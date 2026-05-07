@@ -105,7 +105,9 @@ media.addEventListener('wheel', (e) => {
   const img = media.querySelector('img');
   if (!img) return;
 
-  const scale = Math.exp(-e.deltaY * 0.005);
+  // Browsers automatically map Shift+Scroll to horizontal scroll (e.deltaX)
+  const delta = e.deltaY || e.deltaX;
+  const scale = Math.exp(-delta * 0.005);
   let newZoom = zoom * scale;
   newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, newZoom));
 
