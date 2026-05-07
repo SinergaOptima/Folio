@@ -11,3 +11,9 @@ frontend/dist/
 
 # MacOS
 .DS_Store
+
+# AI Tools
+.gemini/
+.cursor/
+.windsurf/
+.vscode/

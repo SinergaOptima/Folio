@@ -105,6 +105,10 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === '0') { resetZoom(); }
 });
 
+/* ── State ── */
+let panX = 0, panY = 0;
+let isDragging = false, startX, startY;
+
 /* ── Shift+Scroll Zoom ── */
 media.addEventListener('wheel', (e) => {
   if (!e.shiftKey) return;
@@ -113,15 +117,14 @@ media.addEventListener('wheel', (e) => {
   const img = media.querySelector('img');
   if (!img) return;
 
-  // Use e.deltaY to determine direction. e.deltaY > 0 means scrolling down (zoom out).
-  const delta = e.deltaY > 0 ? -0.10 : 0.10;
-  let newZoom = zoom * (1 + delta);
+  const scale = Math.exp(-e.deltaY * 0.005);
+  let newZoom = zoom * scale;
   newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, newZoom));
 
   if (Math.abs(newZoom - zoom) > 0.001) {
     const rect = media.getBoundingClientRect();
-    const cx = e.clientX - rect.left;
-    const cy = e.clientY - rect.top;
+    const cx = e.clientX - rect.left - (rect.width / 2);
+    const cy = e.clientY - rect.top - (rect.height / 2);
     setZoom(newZoom, cx, cy);
   }
 }, { passive: false });
@@ -136,15 +139,9 @@ function setZoom(level, cx, cy) {
   zoomLabel.textContent = Math.round(zoom * 100) + '%';
 
   if (zoom <= 1.01) {
-    // Fit mode
-    zoom = 1;
+    zoom = 1; panX = 0; panY = 0;
     img.classList.remove('zoomed');
-    img.style.width = '';
-    img.style.height = '';
-    img.style.maxWidth = '';
-    img.style.maxHeight = '';
-    delete img.dataset.fitW;
-    delete img.dataset.fitH;
+    img.style.transform = '';
     media.classList.remove('panning');
     zoomSlider.value = 100;
     zoomLabel.textContent = '100%';
@@ -152,34 +149,33 @@ function setZoom(level, cx, cy) {
     img.classList.add('zoomed');
     media.classList.add('panning');
 
-    // Capture fit size on first zoom
-    if (!img.dataset.fitW) {
-      const rect = img.getBoundingClientRect();
-      img.dataset.fitW = rect.width;
-      img.dataset.fitH = rect.height;
-    }
-    
-    const fitW = parseFloat(img.dataset.fitW);
-    const fitH = parseFloat(img.dataset.fitH);
-
-    // Get current scroll center before resizing
-    const oldScrollX = media.scrollLeft;
-    const oldScrollY = media.scrollTop;
-
-    // Apply exact pixel sizing
-    img.style.maxWidth = 'none';
-    img.style.maxHeight = 'none';
-    img.style.width = (fitW * zoom) + 'px';
-    img.style.height = (fitH * zoom) + 'px';
-
-    // Adjust scroll to keep cursor centered on the same image pixel
     if (cx !== undefined && cy !== undefined) {
-      const scaleRatio = zoom / oldZoom;
-      media.scrollLeft = (oldScrollX + cx) * scaleRatio - cx;
-      media.scrollTop = (oldScrollY + cy) * scaleRatio - cy;
+      const dx = cx - panX;
+      const dy = cy - panY;
+      const ratio = zoom / oldZoom;
+      panX = cx - dx * ratio;
+      panY = cy - dy * ratio;
     }
+
+    img.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
   }
 }
+
+/* ── Drag Panning ── */
+media.addEventListener('mousedown', (e) => {
+  if (zoom <= 1 || e.button !== 0) return;
+  isDragging = true;
+  startX = e.clientX - panX;
+  startY = e.clientY - panY;
+});
+window.addEventListener('mousemove', (e) => {
+  if (!isDragging) return;
+  panX = e.clientX - startX;
+  panY = e.clientY - startY;
+  const img = media.querySelector('img');
+  if (img) img.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+});
+window.addEventListener('mouseup', () => isDragging = false);
 
 function resetZoom() {
   setZoom(1);

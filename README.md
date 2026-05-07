@@ -11,15 +11,4 @@ Folio is a high-performance, macOS-native media viewer designed with an editoria
 - **Native macOS Feel**: Draggable regions, custom overlay titlebar, and smooth spring-based animations.
 - **Precise Zoom**: Shift+scroll zoom that perfectly tracks the cursor, and a variable HUD slider.
 
-## Building
 
-```bash
-# Install frontend dependencies
-cd frontend
-npm install
-npm run build
-
-# Build the macOS app bundle
-cd ../src-tauri
-npx @tauri-apps/cli build
-```

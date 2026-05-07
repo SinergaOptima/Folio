@@ -236,7 +236,7 @@ body {
   display: flex; align-items: center; justify-content: center;
   overflow: hidden; position: relative;
 }
-.media-wrap.panning { overflow: auto; cursor: grab; }
+.media-wrap.panning { cursor: grab; }
 .media-wrap.panning:active { cursor: grabbing; }
 
 .media-wrap img {
@@ -245,14 +245,13 @@ body {
   max-height: calc(100% - 32px);
   object-fit: contain;
   border-radius: 3px;
-  transition: opacity 0.3s ease, transform 0.2s var(--ease-expo);
+  transition: opacity 0.3s ease;
   opacity: 0;
   transform-origin: center center;
   will-change: transform;
 }
 .media-wrap img.loaded { opacity: 1; }
 .media-wrap img.zoomed {
-  max-width: none; max-height: none;
   cursor: grab;
 }
 
