@@ -13,7 +13,7 @@ const win = getCurrentWindow();
 const app = document.getElementById('app');
 app.innerHTML = `
   <div class="welcome" id="welcome">
-    <div class="welcome-dragbar" id="wDrag"></div>
+    <div class="welcome-dragbar" id="wDrag" data-tauri-drag-region></div>
     <div class="welcome-bg"></div>
     <div class="welcome-orb"></div><div class="welcome-orb"></div>
     <div class="welcome-orb"></div><div class="welcome-orb"></div>
@@ -25,7 +25,7 @@ app.innerHTML = `
   </div>
 
   <div class="sidebar" id="sidebar" style="display:none">
-    <div class="sidebar-dragbar" id="sDrag">
+    <div class="sidebar-dragbar" id="sDrag" data-tauri-drag-region>
       <span class="folder-name" id="folderLabel"></span>
     </div>
     <div class="sidebar-controls">
@@ -43,7 +43,7 @@ app.innerHTML = `
   </div>
 
   <div class="viewer" id="viewer" style="display:none">
-    <div class="viewer-dragbar" id="vDrag"></div>
+    <div class="viewer-dragbar" id="vDrag" data-tauri-drag-region></div>
     <div class="media-wrap" id="media"></div>
     <button class="nav-arrow prev" id="prev">‹</button>
     <button class="nav-arrow next" id="next">›</button>
@@ -68,18 +68,6 @@ const badge     = $('badge');
 const folderLabel = $('folderLabel');
 const zoomSlider  = $('zoomSlider');
 const zoomLabel   = $('zoomLabel');
-
-/* ── Window dragging ── */
-function drag(el) {
-  el.addEventListener('mousedown', async (e) => {
-    if (e.target.closest('button,input,a,select')) return;
-    if (e.button !== 0) return;
-    await win.startDragging();
-  });
-}
-drag($('wDrag'));
-drag($('sDrag'));
-drag($('vDrag'));
 
 /* ── Events ── */
 $('openBtn').addEventListener('click', openFolder);
