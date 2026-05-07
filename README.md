@@ -13,18 +13,18 @@ Folio is a high-performance, macOS-native media viewer designed with an editoria
 
 ## Troubleshooting
 
+## Troubleshooting
+
 ### "App is damaged and can't be opened" (macOS)
-Because Folio is an indie, open-source app and isn't cryptographically "notarized" by Apple, macOS Gatekeeper may flag the downloaded `.dmg` as untrusted. 
+Because Folio is a free, open-source app, it is not cryptographically "notarized" using a paid Apple Developer account ($99/year). Because of this, modern macOS Gatekeeper intentionally marks the downloaded app as "damaged" to force developers into their paid ecosystem, completely hiding the "Open Anyway" button.
 
-**To easily bypass this without using the terminal:**
-1. Drag the **Folio** app from the downloaded `.dmg` into your **Applications** folder.
-2. Open your **Applications** folder in Finder.
-3. **Right-click** (or Control-click) on the `Folio` app.
-4. Click **Open** from the context menu.
-5. A dialog will pop up giving you an **"Open"** button. Click it.
-
-You only have to do this once. macOS will remember that you trust the app, and you can open it normally from Launchpad forever after!
-
-*(If you don't see the Open button, try opening the app normally, then go to your Mac's **System Settings > Privacy & Security**. Scroll down to the Security section and click **"Open Anyway"** next to the Folio warning.)*
+**The ONLY way to bypass Apple's block for free apps is a one-time terminal command:**
+1. Drag the **Folio** app from the `.dmg` into your **Applications** folder.
+2. Open your Mac's **Terminal** app.
+3. Copy and paste this exact command and press Enter:
+```bash
+xattr -cr /Applications/Folio.app
+```
+This simply strips Apple's "quarantine" flag from the file. You will now be able to open Folio normally forever!
 
 
