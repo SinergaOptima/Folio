@@ -20,6 +20,7 @@ dirs = "6.0"
 tauri = { version = "2.0.0", features = [] }
 tauri-build = { version = "2.0.0", features = [] }
 tauri-plugin-dialog = "2.0.0"
+tauri-plugin-updater = "2.0.0"
 image = { version = "0.25", default-features = true, features = ["jpeg", "png", "webp", "avif", "tiff"] }
 kamadak-exif = "0.6"
 lru = "0.16"
@@ -41,3 +42,7 @@ expect_used = "deny"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+# Optimize dependencies in dev builds — image decoding is 10-30x faster
+[profile.dev.package."*"]
+opt-level = 3

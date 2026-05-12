@@ -16,6 +16,8 @@ struct UiItem {
     orientation: u16,
     format: Option<String>,
     is_video: bool,
+    size: u64,
+    modified: u64,
 }
 
 struct AppState {
@@ -25,40 +27,78 @@ struct AppState {
 
 #[tauri::command]
 async fn open_folder_picker(state: State<'_, Arc<AppState>>) -> Result<Option<String>, String> {
-    let folder = rfd::FileDialog::new().pick_folder();
-    if let Some(folder) = folder {
-        let index = build_index(&folder, &state.cache).map_err(|e| e.to_string())?;
-        let path_str = folder.to_string_lossy().to_string();
-        *state.index.write() = Some(index);
-        Ok(Some(path_str))
-    } else {
-        Ok(None)
-    }
+    // Use AsyncFileDialog so the main thread stays free
+    let folder = rfd::AsyncFileDialog::new()
+        .pick_folder()
+        .await;
+
+    let Some(folder) = folder else {
+        return Ok(None);
+    };
+
+    let folder_path = folder.path().to_path_buf();
+    let state_arc = state.inner().clone();
+
+    // Heavy work on a blocking thread so the UI stays responsive
+    let path_str = tauri::async_runtime::spawn_blocking(move || {
+        let index = build_index(&folder_path, &state_arc.cache)
+            .map_err(|e| e.to_string())?;
+        let path_str = folder_path.to_string_lossy().to_string();
+        *state_arc.index.write() = Some(index);
+        Ok::<String, String>(path_str)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    Ok(Some(path_str))
 }
 
 #[tauri::command]
 async fn get_folder_items(state: State<'_, Arc<AppState>>) -> Result<Vec<UiItem>, String> {
-    let index_lock = state.index.read();
-    if let Some(index) = &*index_lock {
-        let items = index.items.iter().map(|item| UiItem {
-            path: item.path.to_string_lossy().to_string(),
-            width: item.metadata.width,
-            height: item.metadata.height,
-            orientation: item.metadata.orientation,
-            format: item.metadata.format.map(|f| format!("{:?}", f)),
-            is_video: item.is_video,
-        }).collect();
-        Ok(items)
-    } else {
-        Ok(vec![])
-    }
+    let state_arc = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let index_lock = state_arc.index.read();
+        if let Some(index) = &*index_lock {
+            let items = index.items.iter().map(|item| {
+                let meta = std::fs::metadata(&item.path).ok();
+                let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+                let modified = meta.as_ref()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+
+                UiItem {
+                    path: item.path.to_string_lossy().to_string(),
+                    width: item.metadata.width,
+                    height: item.metadata.height,
+                    orientation: item.metadata.orientation,
+                    format: item.metadata.format.map(|f| format!("{:?}", f)),
+                    is_video: item.is_video,
+                    size,
+                    modified,
+                }
+            }).collect();
+            Ok(items)
+        } else {
+            Ok(vec![])
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 async fn get_thumbnail(path: String, max_side: u32, state: State<'_, Arc<AppState>>) -> Result<String, String> {
-    let path = PathBuf::from(path);
-    let thumb_path = state.cache.ensure_thumbnail(&path, max_side).map_err(|e| e.to_string())?;
-    Ok(thumb_path.to_string_lossy().to_string())
+    let state_arc = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(path);
+        let thumb_path = state_arc.cache.ensure_thumbnail(&path, max_side)
+            .map_err(|e| e.to_string())?;
+        Ok::<String, String>(thumb_path.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Parse a Range header like "bytes=0-1023" and return (start, optional_end)
@@ -98,6 +138,7 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(app_state)
         .register_uri_scheme_protocol("folio", move |_ctx, request| {
             let uri = request.uri().to_string();
@@ -128,14 +169,10 @@ fn main() {
                 .map(|s| s.to_string());
 
             if is_video && file_len > 0 {
-                // For video files, support range requests to avoid loading
-                // the entire file into memory
                 if let Some(ref range_val) = range_header {
                     if let Some((start, end)) = parse_range(range_val, file_len) {
                         let length = end - start + 1;
-                        // Cap chunk size at 4MB to avoid memory issues
                         let chunk_size = length.min(4 * 1024 * 1024);
-                        let _actual_end = start + chunk_size - 1;
 
                         use std::io::{Read, Seek, SeekFrom};
                         let mut file = match std::fs::File::open(&path) {
@@ -164,11 +201,7 @@ fn main() {
                     }
                 }
 
-                // No range header — return full file but with Accept-Ranges
-                // For smaller videos, read the whole thing; for large ones, just
-                // send the first chunk and let the browser request ranges
                 if file_len <= 50 * 1024 * 1024 {
-                    // Under 50MB, read the whole file
                     let data = std::fs::read(&path).unwrap_or_default();
                     return tauri::http::Response::builder()
                         .status(200)
@@ -179,7 +212,6 @@ fn main() {
                         .body(data)
                         .unwrap();
                 } else {
-                    // Over 50MB, send first 4MB chunk as 206 to force range mode
                     use std::io::Read;
                     let mut file = match std::fs::File::open(&path) {
                         Ok(f) => f,
@@ -231,6 +263,39 @@ fn main() {
                         .unwrap()
                 }
             }
+        })
+        .setup(|app| {
+            use tauri::menu::{Menu, MenuItem, Submenu, PredefinedMenuItem};
+            use tauri::Emitter;
+
+            let open_folder = MenuItem::with_id(app, "open-folder", "Open Folder...", true, Some("CmdOrControl+O"))?;
+            let settings = MenuItem::with_id(app, "settings", "Settings...", true, Some("CmdOrControl+,"))?;
+
+            let file_menu = Submenu::with_items(app, "File", true, &[&open_folder])?;
+
+            #[cfg(target_os = "macos")]
+            let quit = PredefinedMenuItem::quit(app, None)?;
+
+            #[cfg(target_os = "macos")]
+            let app_menu = Submenu::with_items(app, "Folio", true, &[&settings, &quit])?;
+
+            #[cfg(not(target_os = "macos"))]
+            let app_menu = Submenu::with_items(app, "Folio", true, &[&settings])?;
+
+            let menu = Menu::with_items(app, &[&app_menu, &file_menu])?;
+            app.set_menu(menu)?;
+
+            let handle = app.handle().clone();
+            app.on_menu_event(move |_app, event| {
+                let id: &str = event.id().as_ref();
+                match id {
+                    "open-folder" => { let _ = handle.emit("menu-open-folder", ()); }
+                    "settings" => { let _ = handle.emit("menu-settings", ()); }
+                    _ => {}
+                }
+            });
+
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             open_folder_picker,
