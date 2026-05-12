@@ -2,7 +2,7 @@
 
 A lightweight photo and video viewer built in rust.
 
-Folio is a high-performance, macOS-native media viewer designed with an editorial aesthetic. It uses Tauri for its architecture, leveraging a native Rust backend for lightning-fast media decoding and a modern Vanilla JS/CSS frontend for a polished, glassmorphic UI.
+Folio is a high-performance, macOS-native media viewer. It uses Tauri for its architecture, leveraging a native Rust backend for lightning-fast media decoding and a modern Vanilla JS/CSS frontend for a polished, glassmorphic UI.
 
 ## Features
 
@@ -12,8 +12,6 @@ Folio is a high-performance, macOS-native media viewer designed with an editoria
 - **Customizable Keybindings**: Fully customizable shortcuts and mouse modifiers via the Settings menu.
 - **Native macOS Feel**: Cinematic hardware-accelerated mesh gradient backgrounds, dynamic color tinting based on the active image, and custom magnetic cursors.
 - **Precise Zoom**: Buttery smooth, customizable `Shift+Scroll` variable zoom that perfectly tracks the cursor with drag panning.
-
-## Troubleshooting
 
 ## Troubleshooting
 
