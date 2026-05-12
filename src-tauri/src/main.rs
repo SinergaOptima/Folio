@@ -9,6 +9,15 @@ use library_core::{LibraryCache, LibraryIndex, build_index};
 use media_core::is_video_path;
 
 #[derive(serde::Serialize)]
+struct UiExif {
+    camera: Option<String>,
+    aperture: Option<String>,
+    shutter_speed: Option<String>,
+    iso: Option<String>,
+    focal_length: Option<String>,
+}
+
+#[derive(serde::Serialize)]
 struct UiItem {
     path: String,
     width: u32,
@@ -18,6 +27,7 @@ struct UiItem {
     is_video: bool,
     size: u64,
     modified: u64,
+    exif: Option<UiExif>,
 }
 
 struct AppState {
@@ -68,6 +78,14 @@ async fn get_folder_items(state: State<'_, Arc<AppState>>) -> Result<Vec<UiItem>
                     .map(|d| d.as_secs())
                     .unwrap_or(0);
 
+                let exif = item.metadata.exif.as_ref().map(|e| UiExif {
+                    camera: e.camera.clone(),
+                    aperture: e.aperture.clone(),
+                    shutter_speed: e.shutter_speed.clone(),
+                    iso: e.iso.clone(),
+                    focal_length: e.focal_length.clone(),
+                });
+
                 UiItem {
                     path: item.path.to_string_lossy().to_string(),
                     width: item.metadata.width,
@@ -77,6 +95,7 @@ async fn get_folder_items(state: State<'_, Arc<AppState>>) -> Result<Vec<UiItem>
                     is_video: item.is_video,
                     size,
                     modified,
+                    exif,
                 }
             }).collect();
             Ok(items)

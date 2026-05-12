@@ -9,12 +9,22 @@ use image::{DynamicImage, GenericImageView};
 use thiserror::Error;
 use walkdir::WalkDir;
 
+#[derive(Debug, Clone, Default)]
+pub struct ExifData {
+    pub camera: Option<String>,
+    pub aperture: Option<String>,
+    pub shutter_speed: Option<String>,
+    pub iso: Option<String>,
+    pub focal_length: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ImageMetadata {
     pub width: u32,
     pub height: u32,
     pub orientation: u16,
     pub format: Option<image::ImageFormat>,
+    pub exif: Option<ExifData>,
 }
 
 #[derive(Debug, Clone)]
@@ -93,6 +103,7 @@ pub fn read_metadata_fast(path: &Path) -> Result<ImageMetadata> {
             height: 1080,
             orientation: 1,
             format: None,
+            exif: None,
         });
     }
 
@@ -117,13 +128,14 @@ pub fn read_metadata_fast(path: &Path) -> Result<ImageMetadata> {
         }
     };
 
-    let orientation = read_exif_orientation(path).unwrap_or(1);
+    let (orientation, exif_data) = read_full_exif(path).unwrap_or((1, None));
 
     Ok(ImageMetadata {
         width,
         height,
         orientation,
         format,
+        exif: exif_data,
     })
 }
 
@@ -164,15 +176,59 @@ fn downscale_if_needed(image: DynamicImage, max_side: u32) -> DynamicImage {
 }
 
 fn read_exif_orientation(path: &Path) -> Result<u16> {
+    let (orientation, _) = read_full_exif(path)?;
+    Ok(orientation)
+}
+
+fn read_full_exif(path: &Path) -> Result<(u16, Option<ExifData>)> {
     let file = File::open(path)?;
     let mut reader = BufReader::new(file);
-    let exif = Reader::new().read_from_container(&mut reader)?;
+    let exif = match Reader::new().read_from_container(&mut reader) {
+        Ok(e) => e,
+        Err(_) => return Ok((1, None)),
+    };
+
     let orientation = exif
         .get_field(Tag::Orientation, In::PRIMARY)
         .and_then(|field| field.value.get_uint(0))
         .map(|v| v as u16)
         .unwrap_or(1);
-    Ok(orientation)
+
+    let camera = exif
+        .get_field(Tag::Model, In::PRIMARY)
+        .map(|f| f.display_value().with_unit(&exif).to_string());
+    
+    let aperture = exif
+        .get_field(Tag::FNumber, In::PRIMARY)
+        .map(|f| f.display_value().with_unit(&exif).to_string());
+    
+    let shutter_speed = exif
+        .get_field(Tag::ExposureTime, In::PRIMARY)
+        .map(|f| f.display_value().with_unit(&exif).to_string());
+
+    let iso = exif
+        .get_field(Tag::PhotographicSensitivity, In::PRIMARY)
+        .map(|f| f.display_value().with_unit(&exif).to_string());
+
+    let focal_length = exif
+        .get_field(Tag::FocalLength, In::PRIMARY)
+        .map(|f| f.display_value().with_unit(&exif).to_string());
+
+    let has_exif = camera.is_some() || aperture.is_some() || shutter_speed.is_some() || iso.is_some() || focal_length.is_some();
+    
+    let exif_data = if has_exif {
+        Some(ExifData {
+            camera,
+            aperture,
+            shutter_speed,
+            iso,
+            focal_length,
+        })
+    } else {
+        None
+    };
+
+    Ok((orientation, exif_data))
 }
 
 fn apply_orientation(image: DynamicImage, orientation: u16) -> DynamicImage {

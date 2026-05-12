@@ -82,7 +82,8 @@ impl LibraryCache {
     }
 
     fn ensure_schema(&self) -> Result<()> {
-        self.connection.lock().unwrap().execute_batch(
+        let conn = self.connection.lock().unwrap();
+        conn.execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS image_metadata (
                 path TEXT PRIMARY KEY,
@@ -90,25 +91,54 @@ impl LibraryCache {
                 width INTEGER NOT NULL,
                 height INTEGER NOT NULL,
                 orientation INTEGER NOT NULL,
-                format TEXT
+                format TEXT,
+                camera TEXT,
+                aperture TEXT,
+                shutter_speed TEXT,
+                iso TEXT,
+                focal_length TEXT
             );
             "#,
         )?;
+
+        // Simple migration for existing DBs
+        let _ = conn.execute("ALTER TABLE image_metadata ADD COLUMN camera TEXT;", []);
+        let _ = conn.execute("ALTER TABLE image_metadata ADD COLUMN aperture TEXT;", []);
+        let _ = conn.execute("ALTER TABLE image_metadata ADD COLUMN shutter_speed TEXT;", []);
+        let _ = conn.execute("ALTER TABLE image_metadata ADD COLUMN iso TEXT;", []);
+        let _ = conn.execute("ALTER TABLE image_metadata ADD COLUMN focal_length TEXT;", []);
+
         Ok(())
     }
 
     pub fn upsert_metadata(&self, path: &Path, metadata: &ImageMetadata) -> Result<()> {
         let modified = modified_secs(path)?;
+        let (camera, aperture, shutter_speed, iso, focal_length) = match &metadata.exif {
+            Some(e) => (
+                e.camera.clone(),
+                e.aperture.clone(),
+                e.shutter_speed.clone(),
+                e.iso.clone(),
+                e.focal_length.clone(),
+            ),
+            None => (None, None, None, None, None),
+        };
+
         self.connection.lock().unwrap().execute(
             r#"
-            INSERT INTO image_metadata(path, modified_secs, width, height, orientation, format)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            INSERT INTO image_metadata(path, modified_secs, width, height, orientation, format, camera, aperture, shutter_speed, iso, focal_length)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
             ON CONFLICT(path) DO UPDATE SET
                 modified_secs = excluded.modified_secs,
                 width = excluded.width,
                 height = excluded.height,
                 orientation = excluded.orientation,
-                format = excluded.format
+                format = excluded.format,
+                camera = excluded.camera,
+                aperture = excluded.aperture,
+                shutter_speed = excluded.shutter_speed,
+                iso = excluded.iso,
+                focal_length = excluded.focal_length
             "#,
             params![
                 path.to_string_lossy(),
@@ -117,6 +147,11 @@ impl LibraryCache {
                 i64::from(metadata.height),
                 i64::from(metadata.orientation),
                 metadata.format.map(|f| format!("{f:?}")),
+                camera,
+                aperture,
+                shutter_speed,
+                iso,
+                focal_length,
             ],
         )?;
         Ok(())
@@ -128,7 +163,7 @@ impl LibraryCache {
             .connection.lock().unwrap()
             .query_row(
                 r#"
-                SELECT width, height, orientation, format, modified_secs
+                SELECT width, height, orientation, format, modified_secs, camera, aperture, shutter_speed, iso, focal_length
                 FROM image_metadata
                 WHERE path = ?1
                 "#,
@@ -140,23 +175,43 @@ impl LibraryCache {
                         row.get::<_, i64>(2)?,
                         row.get::<_, Option<String>>(3)?,
                         row.get::<_, i64>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, Option<String>>(8)?,
+                        row.get::<_, Option<String>>(9)?,
                     ))
                 },
             )
             .optional()?;
 
-        let Some((width, height, orientation, format_name, cached_modified)) = row else {
+        let Some((width, height, orientation, format_name, cached_modified, camera, aperture, shutter_speed, iso, focal_length)) = row else {
             return Ok(None);
         };
         if cached_modified != modified {
             return Ok(None);
         }
         let format = format_name.as_deref().and_then(parse_image_format);
+        
+        let has_exif = camera.is_some() || aperture.is_some() || shutter_speed.is_some() || iso.is_some() || focal_length.is_some();
+        let exif = if has_exif {
+            Some(media_core::ExifData {
+                camera,
+                aperture,
+                shutter_speed,
+                iso,
+                focal_length,
+            })
+        } else {
+            None
+        };
+
         Ok(Some(ImageMetadata {
             width: width as u32,
             height: height as u32,
             orientation: orientation as u16,
             format,
+            exif,
         }))
     }
 

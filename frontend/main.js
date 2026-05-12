@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { check } from '@tauri-apps/plugin-updater';
 
 /* ── State ── */
@@ -15,12 +16,15 @@ app.innerHTML = `
   <div class="welcome" id="welcome">
     <div class="welcome-dragbar" id="wDrag" data-tauri-drag-region></div>
     <div class="welcome-bg"></div>
-    <div class="welcome-orb"></div><div class="welcome-orb"></div>
-    <div class="welcome-orb"></div><div class="welcome-orb"></div>
     <div class="welcome-content">
       <h1>Folio</h1>
       <p class="tagline">Your photography, undistracted.</p>
       <button class="welcome-btn" id="openBtn"><span>Open Folder</span></button>
+      <div class="welcome-shortcuts">
+        <span><kbd>⇧</kbd> + Scroll to Zoom</span>
+        <span><kbd>⇧</kbd> + Mid Click to Pan</span>
+        <span>Drag to Move Window</span>
+      </div>
     </div>
   </div>
 
@@ -43,8 +47,20 @@ app.innerHTML = `
   </div>
 
   <div class="viewer" id="viewer" style="display:none">
+    <div class="viewer-bg-base"></div>
+    <div class="dynamic-bg-tint" id="bgTint"></div>
     <div class="viewer-dragbar" id="vDrag" data-tauri-drag-region></div>
     <div class="media-wrap" id="media"></div>
+    
+    <div class="editorial-overlay" id="editorialOverlay">
+      <div class="editorial-camera" id="edCamera"></div>
+      <div class="editorial-stats">
+        <div class="editorial-stat-group"><span class="editorial-stat-label">Aperture</span><span class="editorial-stat-value" id="edAperture">—</span></div>
+        <div class="editorial-stat-group"><span class="editorial-stat-label">Shutter</span><span class="editorial-stat-value" id="edShutter">—</span></div>
+        <div class="editorial-stat-group"><span class="editorial-stat-label">ISO</span><span class="editorial-stat-value" id="edIso">—</span></div>
+        <div class="editorial-stat-group"><span class="editorial-stat-label">Focal</span><span class="editorial-stat-value" id="edFocal">—</span></div>
+      </div>
+    </div>
     <button class="nav-arrow prev" id="prev">‹</button>
     <button class="nav-arrow next" id="next">›</button>
     <div class="zoom-hud" id="zoomHud">
@@ -90,6 +106,39 @@ app.innerHTML = `
           <label>Updates</label>
           <button class="settings-update-btn" id="checkUpdateBtn">Check Now</button>
         </div>
+        <div class="sidebar-divider" style="margin: 4px 0"></div>
+        <div class="setting-row">
+          <label style="font-size: 0.85rem; color: var(--text-primary); font-weight: 500;">Keybindings</label>
+          <button class="settings-update-btn" id="resetKeybindsBtn">Reset Defaults</button>
+        </div>
+        <div class="setting-row">
+          <label>Next Image</label>
+          <button class="keybind-btn" data-action="nextImage"></button>
+        </div>
+        <div class="setting-row">
+          <label>Previous Image</label>
+          <button class="keybind-btn" data-action="prevImage"></button>
+        </div>
+        <div class="setting-row">
+          <label>Reset Zoom</label>
+          <button class="keybind-btn" data-action="resetZoom"></button>
+        </div>
+        <div class="setting-row">
+          <label>Toggle Metadata</label>
+          <button class="keybind-btn" data-action="toggleMetadata"></button>
+        </div>
+        <div class="setting-row">
+          <label>Play/Pause Video</label>
+          <button class="keybind-btn" data-action="playVideo"></button>
+        </div>
+        <div class="setting-row">
+          <label>Zoom Modifier (Scroll)</label>
+          <button class="keybind-btn" data-action="modifierZoom"></button>
+        </div>
+        <div class="setting-row">
+          <label>Pan Modifier (Middle Click)</label>
+          <button class="keybind-btn" data-action="modifierPan"></button>
+        </div>
       </div>
     </div>
   </div>
@@ -99,6 +148,8 @@ app.innerHTML = `
     <button class="update-action" id="updateAction">Update</button>
     <button class="update-dismiss" id="updateDismiss">×</button>
   </div>
+
+  <div class="custom-cursor" id="customCursor"></div>
 `;
 
 const $ = id => document.getElementById(id);
@@ -119,6 +170,17 @@ const zoomLabel   = $('zoomLabel');
 let currentSort = localStorage.getItem('folio_sort') || 'name';
 let zoomSens = parseFloat(localStorage.getItem('folio_zoom_sens')) || 5;
 let currentTheme = localStorage.getItem('folio_theme') || 'dark';
+
+const defaultKeybinds = {
+  nextImage: 'ArrowRight',
+  prevImage: 'ArrowLeft',
+  resetZoom: '0',
+  toggleMetadata: 'i',
+  playVideo: ' ',
+  modifierZoom: 'Shift',
+  modifierPan: 'Shift'
+};
+let keybinds = { ...defaultKeybinds, ...JSON.parse(localStorage.getItem('folio_keybinds') || '{}') };
 
 const sortSelect = $('sortSelect');
 const zoomSensSlider = $('zoomSensSlider');
@@ -176,6 +238,59 @@ themeSelect.addEventListener('change', (e) => {
   applyTheme(currentTheme);
 });
 
+function formatKey(key) {
+  if (key === ' ') return 'Space';
+  if (key === 'ArrowRight') return '→';
+  if (key === 'ArrowLeft') return '←';
+  if (key === 'ArrowUp') return '↑';
+  if (key === 'ArrowDown') return '↓';
+  if (key === 'Escape') return 'Esc';
+  if (key === 'Shift') return '⇧';
+  if (key === 'Control') return '⌃';
+  if (key === 'Alt') return '⌥';
+  if (key === 'Meta') return '⌘';
+  return key.length === 1 ? key.toUpperCase() : key;
+}
+
+function updateKeybindsUI() {
+  document.querySelectorAll('.keybind-btn').forEach(btn => {
+    const action = btn.dataset.action;
+    btn.textContent = formatKey(keybinds[action]);
+  });
+  
+  const shortcuts = document.querySelector('.welcome-shortcuts');
+  if (shortcuts) {
+    shortcuts.innerHTML = `
+      <span><kbd>${formatKey(keybinds.modifierZoom)}</kbd> + Scroll to Zoom</span>
+      <span><kbd>${formatKey(keybinds.modifierPan)}</kbd> + Mid Click to Pan</span>
+      <span>Drag to Move Window</span>
+    `;
+  }
+}
+
+updateKeybindsUI();
+
+$('resetKeybindsBtn').addEventListener('click', () => {
+  keybinds = { ...defaultKeybinds };
+  localStorage.setItem('folio_keybinds', JSON.stringify(keybinds));
+  updateKeybindsUI();
+});
+
+let listeningBtn = null;
+document.querySelectorAll('.keybind-btn').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    if (listeningBtn) {
+      listeningBtn.textContent = formatKey(keybinds[listeningBtn.dataset.action]);
+      listeningBtn.classList.remove('listening');
+    }
+    listeningBtn = btn;
+    btn.textContent = 'Press key...';
+    btn.classList.add('listening');
+    e.stopPropagation();
+  });
+});
+
+
 function sortItems() {
   if (!items.length) return;
   const currentPath = items[idx]?.path;
@@ -225,6 +340,38 @@ listen('menu-settings', () => {
 
 /* ── Keyboard shortcuts (reliable fallback) ── */
 window.addEventListener('keydown', (e) => {
+  if (listeningBtn) {
+    e.preventDefault();
+    if (e.key === 'Escape') {
+      listeningBtn.textContent = formatKey(keybinds[listeningBtn.dataset.action]);
+      listeningBtn.classList.remove('listening');
+      listeningBtn = null;
+      return;
+    }
+    const action = listeningBtn.dataset.action;
+    let key = e.key;
+    if (action.startsWith('modifier')) {
+      if (!['Shift', 'Control', 'Alt', 'Meta'].includes(key)) {
+        listeningBtn.textContent = 'Must be Shift/Ctrl/Alt/Cmd';
+        const resetBtn = listeningBtn;
+        setTimeout(() => {
+          if (listeningBtn === resetBtn) {
+            listeningBtn.textContent = formatKey(keybinds[action]);
+            listeningBtn.classList.remove('listening');
+            listeningBtn = null;
+          }
+        }, 1000);
+        return;
+      }
+    }
+    keybinds[action] = key;
+    localStorage.setItem('folio_keybinds', JSON.stringify(keybinds));
+    updateKeybindsUI();
+    listeningBtn.classList.remove('listening');
+    listeningBtn = null;
+    return;
+  }
+
   // Cmd+O to open folder
   if ((e.metaKey || e.ctrlKey) && e.key === 'o') {
     e.preventDefault();
@@ -244,16 +391,19 @@ window.addEventListener('keydown', (e) => {
   }
 
   if (!items.length) return;
-  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); nav(1); }
-  else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); nav(-1); }
+  const k = e.key.toLowerCase();
+  
+  if (k === keybinds.nextImage.toLowerCase() || e.key === 'ArrowDown') { e.preventDefault(); nav(1); }
+  else if (k === keybinds.prevImage.toLowerCase() || e.key === 'ArrowUp') { e.preventDefault(); nav(-1); }
   else if (e.key === 'Home') { e.preventDefault(); show(0); }
   else if (e.key === 'End') { e.preventDefault(); show(items.length - 1); }
-  else if (e.key === ' ') {
+  else if (k === keybinds.playVideo.toLowerCase()) {
     e.preventDefault();
     const v = media.querySelector('video');
     if (v) v.paused ? v.play() : v.pause();
   }
-  else if (e.key === '0') { resetZoom(); }
+  else if (k === keybinds.resetZoom.toLowerCase()) { resetZoom(); }
+  else if (k === keybinds.toggleMetadata.toLowerCase()) { toggleEditorialOverlay(); }
 });
 
 /* ── Zoom/Pan State ── */
@@ -273,7 +423,8 @@ function scheduleUpdate() {
 
 /* ── Shift+Scroll Zoom ── */
 media.addEventListener('wheel', (e) => {
-  if (!e.shiftKey) return;
+  const modProp = keybinds.modifierZoom.toLowerCase() + 'Key';
+  if (!e[modProp]) return;
   e.preventDefault();
 
   const img = media.querySelector('img');
@@ -325,9 +476,26 @@ function setZoom(level, cx, cy) {
   }
 }
 
-/* ── Drag Panning ── */
+/* ── Drag Panning & Window Dragging ── */
 media.addEventListener('mousedown', (e) => {
-  if (zoom <= 1 || e.button !== 0) return;
+  // If not zoomed in and left-clicking, drag the entire window
+  if (zoom <= 1 && e.button === 0) {
+    e.preventDefault();
+    getCurrentWindow().startDragging();
+    return;
+  }
+
+  // Panning is allowed if zoomed in, AND either:
+  // - Left click (e.button === 0)
+  // - Modifier + Middle click (e.button === 1 && e[modProp])
+  const modProp = keybinds.modifierPan.toLowerCase() + 'Key';
+  const isPanClick = (e.button === 0) || (e.button === 1 && e[modProp]);
+  
+  if (zoom <= 1 || !isPanClick) return;
+  
+  // Prevent default to stop weird scrolling/selection behavior
+  if (e.button === 1) e.preventDefault();
+
   isDragging = true;
   startX = e.clientX - panX;
   startY = e.clientY - panY;
@@ -429,6 +597,38 @@ function show(i) {
   badge.textContent = ext.toUpperCase();
   badge.className = `format-badge fmt-${ext}`;
 
+  // Populate Editorial Metadata
+  if (item.exif) {
+    edCamera.textContent = item.exif.camera || 'Unknown Camera';
+    edAperture.textContent = item.exif.aperture || '—';
+    edShutter.textContent = item.exif.shutter_speed || '—';
+    edIso.textContent = item.exif.iso || '—';
+    edFocal.textContent = item.exif.focal_length || '—';
+  } else {
+    edCamera.textContent = 'No Metadata';
+    edAperture.textContent = '—';
+    edShutter.textContent = '—';
+    edIso.textContent = '—';
+    edFocal.textContent = '—';
+  }
+
+  // Extract color for background tint
+  if (!item.is_video && currentTheme === 'dark') {
+    const thumbSrc = preloadedThumbs.get(item.path);
+    if (thumbSrc) {
+      const tempImg = new Image();
+      tempImg.src = thumbSrc;
+      tempImg.onload = () => {
+        bgTint.style.background = extractDominantColor(tempImg);
+        bgTint.style.opacity = 1;
+      };
+    } else {
+      bgTint.style.opacity = 0;
+    }
+  } else {
+    bgTint.style.opacity = 0;
+  }
+
   highlightThumb();
 
   // Preload neighbors
@@ -480,7 +680,10 @@ async function loadThumb({ el, path, retries }) {
     const tp = await invoke('get_thumbnail', { path, maxSide: 160 });
     const thumbUrl = `folio://localhost/${encodeURIComponent(tp)}`;
     const img = el.querySelector('img');
-    if (img) img.src = thumbUrl;
+    if (img) {
+      img.src = thumbUrl;
+      img.onload = () => img.classList.add('loaded');
+    }
     // Cache this URL for use as instant placeholder in the main viewer
     cacheThumbUrl(path, thumbUrl);
   } catch (err) {
@@ -491,7 +694,10 @@ async function loadThumb({ el, path, retries }) {
     } else {
       // Final fallback: load original directly
       const img = el.querySelector('img');
-      if (img) img.src = `folio://localhost/${encodeURIComponent(path)}`;
+      if (img) {
+        img.src = `folio://localhost/${encodeURIComponent(path)}`;
+        img.onload = () => img.classList.add('loaded');
+      }
     }
   }
 }
@@ -512,6 +718,7 @@ const obs = new IntersectionObserver((entries) => {
         v.src = `folio://localhost/${encodeURIComponent(path)}`;
         v.addEventListener('loadeddata', () => {
           v.currentTime = Math.min(1, v.duration || 0);
+          v.classList.add('loaded');
         }, { once: true });
       }
     } else {
@@ -649,4 +856,79 @@ async function checkForUpdates(manual = false) {
 // Auto-check on startup (with short delay so UI loads first)
 if (autoCheckEnabled) {
   setTimeout(() => checkForUpdates(false), 2000);
+}
+
+/* ═══ LUXURY UI FEATURES ═══ */
+
+// 1. Custom Magnetic Cursor
+getCurrentWindow().setCursorVisible(false).catch(() => {});
+const customCursor = $('customCursor');
+let cursorVisible = false;
+
+window.addEventListener('mousemove', (e) => {
+  if (!cursorVisible) {
+    customCursor.style.opacity = 1;
+    cursorVisible = true;
+  }
+  customCursor.style.left = e.clientX + 'px';
+  customCursor.style.top = e.clientY + 'px';
+  
+  // Magnetic effect on interactive elements
+  const target = e.target;
+  if (target.closest('button, .thumb, input, select, .welcome-btn, .sidebar-dragbar')) {
+    customCursor.classList.add('hovering');
+  } else {
+    customCursor.classList.remove('hovering');
+  }
+});
+window.addEventListener('mouseout', () => {
+  customCursor.style.opacity = 0;
+  cursorVisible = false;
+});
+
+// 2. Editorial Metadata Overlay
+let overlayVisible = false;
+const edOverlay = $('editorialOverlay');
+const edCamera = $('edCamera');
+const edAperture = $('edAperture');
+const edShutter = $('edShutter');
+const edIso = $('edIso');
+const edFocal = $('edFocal');
+
+function toggleEditorialOverlay() {
+  if (!items.length || viewer.style.display === 'none') return;
+  overlayVisible = !overlayVisible;
+  if (overlayVisible) {
+    edOverlay.classList.add('visible');
+  } else {
+    edOverlay.classList.remove('visible');
+  }
+}
+
+// 3. Fast Canvas-based Color Extraction for Dynamic Tint
+const bgTint = $('bgTint');
+const colorCanvas = document.createElement('canvas');
+const colorCtx = colorCanvas.getContext('2d', { willReadFrequently: true });
+colorCanvas.width = 64;
+colorCanvas.height = 64;
+
+function extractDominantColor(imgEl) {
+  try {
+    colorCtx.drawImage(imgEl, 0, 0, 64, 64);
+    const data = colorCtx.getImageData(0, 0, 64, 64).data;
+    let r = 0, g = 0, b = 0;
+    const pixelCount = 64 * 64;
+    for (let i = 0; i < data.length; i += 4) {
+      r += data[i];
+      g += data[i+1];
+      b += data[i+2];
+    }
+    r = Math.floor(r / pixelCount);
+    g = Math.floor(g / pixelCount);
+    b = Math.floor(b / pixelCount);
+    // Darken slightly for subtlety
+    return `rgba(${r}, ${g}, ${b}, 0.25)`;
+  } catch (e) {
+    return 'transparent';
+  }
 }
