@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { LogicalPosition } from '@tauri-apps/api/dpi';
 import { check } from '@tauri-apps/plugin-updater';
 
 /* ── State ── */
@@ -477,7 +478,7 @@ function setZoom(level, cx, cy) {
 }
 
 /* ── Drag Panning & Window Dragging ── */
-media.addEventListener('mousedown', (e) => {
+media.addEventListener('mousedown', async (e) => {
   // If not zoomed in and left-clicking, drag the entire window
   if (zoom <= 1 && e.button === 0) {
     e.preventDefault();
@@ -500,13 +501,17 @@ media.addEventListener('mousedown', (e) => {
   startX = e.clientX - panX;
   startY = e.clientY - panY;
 });
+
 window.addEventListener('mousemove', (e) => {
   if (!isDragging) return;
   panX = e.clientX - startX;
   panY = e.clientY - startY;
   scheduleUpdate();
 });
-window.addEventListener('mouseup', () => isDragging = false);
+
+window.addEventListener('mouseup', () => {
+  isDragging = false;
+});
 
 function resetZoom() {
   setZoom(1);

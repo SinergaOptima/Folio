@@ -8,8 +8,10 @@ Folio is a high-performance, macOS-native media viewer designed with an editoria
 
 - **Blazing Fast I/O**: Multi-threaded metadata extraction and aggressive caching via SQLite WAL mode.
 - **Media Support**: Full native support for JPG, PNG, WEBP, AVIF, TIFF, GIF, and chunked streaming for video files (MP4, MOV, MKV).
-- **Native macOS Feel**: Draggable regions, custom overlay titlebar, and smooth spring-based animations.
-- **Precise Zoom**: Shift+scroll zoom that perfectly tracks the cursor, and a variable HUD slider.
+- **Editorial Metadata Overlay**: Press `I` to bring up a beautiful frosted glass overlay with EXIF data (Aperture, Shutter, ISO, Focal Length).
+- **Customizable Keybindings**: Fully customizable shortcuts and mouse modifiers via the Settings menu.
+- **Native macOS Feel**: Cinematic hardware-accelerated mesh gradient backgrounds, dynamic color tinting based on the active image, and custom magnetic cursors.
+- **Precise Zoom**: Buttery smooth, customizable `Shift+Scroll` variable zoom that perfectly tracks the cursor with drag panning.
 
 ## Troubleshooting
 
