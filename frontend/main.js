@@ -16,7 +16,9 @@ const app = document.getElementById('app');
 app.innerHTML = `
   <div class="welcome" id="welcome">
     <div class="welcome-dragbar" id="wDrag" data-tauri-drag-region></div>
-    <div class="welcome-bg"></div>
+    <div class="welcome-bg" id="welcomeBg">
+      <div class="welcome-bg-inner"></div>
+    </div>
     <div class="welcome-content">
       <h1>Folio</h1>
       <p class="tagline">Your photography, undistracted.</p>
@@ -45,13 +47,22 @@ app.innerHTML = `
     </div>
     <div class="sidebar-divider"></div>
     <div class="filmstrip" id="filmstrip"></div>
+    <div class="sidebar-resizer" id="sidebarResizer"></div>
   </div>
 
   <div class="viewer" id="viewer" style="display:none">
     <div class="viewer-bg-base"></div>
     <div class="dynamic-bg-tint" id="bgTint"></div>
     <div class="viewer-dragbar" id="vDrag" data-tauri-drag-region></div>
-    <div class="media-wrap" id="media"></div>
+    <button class="sidebar-toggle" id="sidebarToggle" title="Toggle Sidebar">Sidebar</button>
+    <div class="media-wrap" id="media">
+      <div class="media-loader" id="mediaLoader" aria-hidden="true">
+        <svg class="loader-ring" viewBox="0 0 44 44">
+          <circle class="loader-track" cx="22" cy="22" r="18"></circle>
+          <circle class="loader-indicator" cx="22" cy="22" r="18"></circle>
+        </svg>
+      </div>
+    </div>
     
     <div class="editorial-overlay" id="editorialOverlay">
       <div class="editorial-camera" id="edCamera"></div>
@@ -68,6 +79,15 @@ app.innerHTML = `
       <input type="range" id="zoomSlider" min="100" max="800" value="100" step="10" />
       <span class="zoom-label" id="zoomLabel">100%</span>
       <button class="zoom-reset" id="zoomReset">FIT</button>
+      <button class="zoom-action fullscreen-toggle" id="fullscreenBtn" title="Enter Fullscreen">FULL</button>
+    </div>
+  </div>
+
+  <div class="image-fullscreen" id="imageFullscreen" aria-hidden="true">
+    <div class="image-fullscreen-bg"></div>
+    <div class="image-fullscreen-ui">
+      <button class="image-fullscreen-exit" id="imageFsExit">Exit</button>
+      <div class="image-fullscreen-hint" id="imageFsHint">Shift + F to exit</div>
     </div>
   </div>
 
@@ -79,66 +99,87 @@ app.innerHTML = `
         <button class="settings-close" id="settingsClose">×</button>
       </div>
       <div class="settings-body">
-        <div class="setting-row">
-          <label for="sortSelect">Sort By</label>
-          <select id="sortSelect">
-            <option value="name">Name</option>
-            <option value="date">Date</option>
-            <option value="size">Size</option>
-          </select>
+        <div class="settings-tabs">
+          <button class="tab-btn active" data-tab="general">General</button>
+          <button class="tab-btn" data-tab="appearance">Appearance</button>
+          <button class="tab-btn" data-tab="keybinds">Keybinds</button>
         </div>
-        <div class="setting-row">
-          <label for="zoomSensSlider">Zoom Sensitivity</label>
-          <input type="range" id="zoomSensSlider" min="1" max="10" value="5" />
+
+        <div class="tab-pane active" id="tab-general">
+          <div class="setting-row">
+            <label for="sortSelect">Sort By</label>
+            <select id="sortSelect">
+              <option value="name">Name</option>
+              <option value="date">Date</option>
+              <option value="size">Size</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label for="zoomSensSlider">Zoom Sensitivity</label>
+            <input type="range" id="zoomSensSlider" min="1" max="10" value="5" />
+          </div>
+          <div class="sidebar-divider" style="margin: 4px 0"></div>
+          <div class="setting-row">
+            <label for="autoUpdateCheck">Check for updates on startup</label>
+            <input type="checkbox" id="autoUpdateCheck" checked />
+          </div>
+          <div class="setting-row">
+            <label>Updates</label>
+            <button class="settings-update-btn" id="checkUpdateBtn">Check Now</button>
+          </div>
         </div>
-        <div class="setting-row">
-          <label for="themeSelect">Theme</label>
-          <select id="themeSelect">
-            <option value="dark">Dark</option>
-            <option value="light">Light</option>
-          </select>
+
+        <div class="tab-pane" id="tab-appearance">
+          <div class="setting-row">
+            <label for="themeSelect">Theme</label>
+            <select id="themeSelect">
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label for="customCursorCheck">Use Custom Cursor</label>
+            <input type="checkbox" id="customCursorCheck" checked />
+          </div>
+          <div class="setting-row">
+            <label for="cinematicCheck">Enable Cinematic Transitions</label>
+            <input type="checkbox" id="cinematicCheck" checked />
+          </div>
         </div>
-        <div class="sidebar-divider" style="margin: 4px 0"></div>
-        <div class="setting-row">
-          <label for="autoUpdateCheck">Check for updates on startup</label>
-          <input type="checkbox" id="autoUpdateCheck" checked />
-        </div>
-        <div class="setting-row">
-          <label>Updates</label>
-          <button class="settings-update-btn" id="checkUpdateBtn">Check Now</button>
-        </div>
-        <div class="sidebar-divider" style="margin: 4px 0"></div>
-        <div class="setting-row">
-          <label style="font-size: 0.85rem; color: var(--text-primary); font-weight: 500;">Keybindings</label>
-          <button class="settings-update-btn" id="resetKeybindsBtn">Reset Defaults</button>
-        </div>
-        <div class="setting-row">
-          <label>Next Image</label>
-          <button class="keybind-btn" data-action="nextImage"></button>
-        </div>
-        <div class="setting-row">
-          <label>Previous Image</label>
-          <button class="keybind-btn" data-action="prevImage"></button>
-        </div>
-        <div class="setting-row">
-          <label>Reset Zoom</label>
-          <button class="keybind-btn" data-action="resetZoom"></button>
-        </div>
-        <div class="setting-row">
-          <label>Toggle Metadata</label>
-          <button class="keybind-btn" data-action="toggleMetadata"></button>
-        </div>
-        <div class="setting-row">
-          <label>Play/Pause Video</label>
-          <button class="keybind-btn" data-action="playVideo"></button>
-        </div>
-        <div class="setting-row">
-          <label>Zoom Modifier (Scroll)</label>
-          <button class="keybind-btn" data-action="modifierZoom"></button>
-        </div>
-        <div class="setting-row">
-          <label>Pan Modifier (Middle Click)</label>
-          <button class="keybind-btn" data-action="modifierPan"></button>
+
+        <div class="tab-pane" id="tab-keybinds">
+          <div class="setting-row">
+            <label style="font-size: 0.85rem; color: var(--text-primary); font-weight: 500;">Keybindings</label>
+            <button class="settings-update-btn" id="resetKeybindsBtn">Reset Defaults</button>
+          </div>
+          <div class="setting-row">
+            <label>Next Image</label>
+            <button class="keybind-btn" data-action="nextImage"></button>
+          </div>
+          <div class="setting-row">
+            <label>Previous Image</label>
+            <button class="keybind-btn" data-action="prevImage"></button>
+          </div>
+          <div class="setting-row">
+            <label>Reset Zoom</label>
+            <button class="keybind-btn" data-action="resetZoom"></button>
+          </div>
+          <div class="setting-row">
+            <label>Toggle Metadata</label>
+            <button class="keybind-btn" data-action="toggleMetadata"></button>
+          </div>
+          <div class="setting-row">
+            <label>Play/Pause Video</label>
+            <button class="keybind-btn" data-action="playVideo"></button>
+          </div>
+          <div class="setting-row">
+            <label>Zoom Modifier (Scroll)</label>
+            <button class="keybind-btn" data-action="modifierZoom"></button>
+          </div>
+          <div class="setting-row">
+            <label>Pan Modifier (Middle Click)</label>
+            <button class="keybind-btn" data-action="modifierPan"></button>
+          </div>
         </div>
       </div>
     </div>
@@ -151,14 +192,19 @@ app.innerHTML = `
   </div>
 
   <div class="custom-cursor" id="customCursor"></div>
+  <div id="toastContainer" class="toast-container"></div>
 `;
 
 const $ = id => document.getElementById(id);
 const welcome   = $('welcome');
+const welcomeBg = $('welcomeBg');
 const sidebar   = $('sidebar');
+const sidebarResizer = $('sidebarResizer');
+const sidebarToggle  = $('sidebarToggle');
 const viewer    = $('viewer');
 const filmstrip = $('filmstrip');
 const media     = $('media');
+const mediaLoader = $('mediaLoader');
 const counter   = $('counter');
 const fname     = $('fname');
 const dims      = $('dims');
@@ -166,11 +212,16 @@ const badge     = $('badge');
 const folderLabel = $('folderLabel');
 const zoomSlider  = $('zoomSlider');
 const zoomLabel   = $('zoomLabel');
+const fullscreenBtn = $('fullscreenBtn');
+const imageFullscreen = $('imageFullscreen');
+const imageFsExit = $('imageFsExit');
+const imageFsHint = $('imageFsHint');
 
 /* ── Settings Logic ── */
 let currentSort = localStorage.getItem('folio_sort') || 'name';
 let zoomSens = parseFloat(localStorage.getItem('folio_zoom_sens')) || 5;
 let currentTheme = localStorage.getItem('folio_theme') || 'dark';
+let cinematicEnabled = localStorage.getItem('folio_cinematic') !== 'false';
 
 const defaultKeybinds = {
   nextImage: 'ArrowRight',
@@ -186,10 +237,12 @@ let keybinds = { ...defaultKeybinds, ...JSON.parse(localStorage.getItem('folio_k
 const sortSelect = $('sortSelect');
 const zoomSensSlider = $('zoomSensSlider');
 const themeSelect = $('themeSelect');
+const cinematicCheck = $('cinematicCheck');
 
 sortSelect.value = currentSort;
 zoomSensSlider.value = zoomSens;
 themeSelect.value = currentTheme;
+if (cinematicCheck) cinematicCheck.checked = cinematicEnabled;
 
 function applyTheme(theme) {
   const root = document.documentElement.style;
@@ -224,10 +277,170 @@ function closeSettings() {
   $('settingsModal').style.display = 'none';
 }
 
+// Toast Notifications
+function showToast(message) {
+  const container = $('toastContainer');
+  if (!container) return;
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.classList.add('hiding');
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+
+// Settings Tabs Logic
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    e.target.classList.add('active');
+    $('tab-' + e.target.dataset.tab).classList.add('active');
+  });
+});
+
+// Custom Cursor Preference
+let useCustomCursor = localStorage.getItem('folio_custom_cursor') !== 'false';
+let trafficLightHover = false;
+let isFullscreen = false;
+const customCursorCheck = $('customCursorCheck');
+if (customCursorCheck) {
+  customCursorCheck.checked = useCustomCursor;
+  customCursorCheck.addEventListener('change', (e) => {
+    useCustomCursor = e.target.checked;
+    localStorage.setItem('folio_custom_cursor', useCustomCursor);
+    updateCursorVisibility();
+    showToast('Cursor preference saved');
+  });
+}
+
+function updateCursorVisibility() {
+  const shouldShowNative = !useCustomCursor || trafficLightHover;
+  document.body.classList.toggle('force-native-cursor', shouldShowNative);
+  getCurrentWindow().setCursorVisible(shouldShowNative).catch(() => {});
+  if (shouldShowNative) {
+    const customCursor = $('customCursor');
+    if (customCursor) customCursor.style.opacity = 0;
+  }
+}
+
+function setTrafficLightHover(active) {
+  if (trafficLightHover === active) return;
+  trafficLightHover = active;
+  updateCursorVisibility();
+}
+updateCursorVisibility();
+
+/* ── Sidebar Width & Collapse ── */
+const SIDEBAR_MIN = 200;
+const SIDEBAR_MAX = 500;
+let sidebarWidth = parseFloat(localStorage.getItem('folio_sidebar_w')) || 220;
+let sidebarCollapsed = localStorage.getItem('folio_sidebar_collapsed') === 'true';
+
+function clampSidebarWidth(value) {
+  return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, value));
+}
+
+function setSidebarWidth(value, persist = true) {
+  sidebarWidth = clampSidebarWidth(value);
+  document.documentElement.style.setProperty('--sidebar-w', `${sidebarWidth}px`);
+  if (persist) localStorage.setItem('folio_sidebar_w', sidebarWidth);
+}
+
+function applySidebarCollapsed() {
+  if (!sidebar) return;
+  sidebar.classList.toggle('collapsed', sidebarCollapsed);
+  if (sidebarToggle) {
+    sidebarToggle.classList.toggle('collapsed', sidebarCollapsed);
+    const label = sidebarCollapsed ? 'Show' : 'Hide';
+    sidebarToggle.textContent = label;
+    sidebarToggle.title = `${label} Sidebar`;
+  }
+  localStorage.setItem('folio_sidebar_collapsed', sidebarCollapsed);
+}
+
+function toggleSidebar() {
+  sidebarCollapsed = !sidebarCollapsed;
+  applySidebarCollapsed();
+}
+
+setSidebarWidth(sidebarWidth);
+applySidebarCollapsed();
+
+if (sidebarToggle) {
+  sidebarToggle.addEventListener('click', toggleSidebar);
+}
+
+async function syncFullscreenState() {
+  try {
+    isFullscreen = await getCurrentWindow().isFullscreen();
+  } catch {
+    isFullscreen = false;
+  }
+  if (isFullscreen && trafficLightHover) {
+    trafficLightHover = false;
+    updateCursorVisibility();
+  }
+  if (fullscreenBtn) {
+    fullscreenBtn.classList.toggle('active', isFullscreen);
+    fullscreenBtn.textContent = isFullscreen ? 'EXIT' : 'FULL';
+    fullscreenBtn.title = isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen';
+  }
+}
+
+async function toggleFullscreen() {
+  try {
+    await getCurrentWindow().setFullscreen(!isFullscreen);
+    await syncFullscreenState();
+  } catch (err) {
+    console.error('[Folio] Fullscreen toggle failed:', err);
+  }
+}
+
+if (fullscreenBtn) {
+  fullscreenBtn.addEventListener('click', () => {
+    toggleFullscreen();
+  });
+}
+syncFullscreenState();
+
+if (sidebarResizer) {
+  let resizing = false;
+  let startX = 0;
+  let startWidth = 0;
+
+  sidebarResizer.addEventListener('mousedown', (e) => {
+    if (sidebarCollapsed) return;
+    resizing = true;
+    startX = e.clientX;
+    startWidth = sidebar.getBoundingClientRect().width;
+    sidebarResizer.classList.add('dragging');
+    document.body.style.cursor = 'ew-resize';
+    e.preventDefault();
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!resizing) return;
+    const dx = e.clientX - startX;
+    setSidebarWidth(startWidth + dx);
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (!resizing) return;
+    resizing = false;
+    sidebarResizer.classList.remove('dragging');
+    document.body.style.cursor = '';
+    updateThumbMaxSide();
+  });
+}
+
 sortSelect.addEventListener('change', (e) => {
   currentSort = e.target.value;
   localStorage.setItem('folio_sort', currentSort);
   sortItems();
+  showToast('Sort order changed');
 });
 zoomSensSlider.addEventListener('input', (e) => {
   zoomSens = parseFloat(e.target.value);
@@ -237,7 +450,16 @@ themeSelect.addEventListener('change', (e) => {
   currentTheme = e.target.value;
   localStorage.setItem('folio_theme', currentTheme);
   applyTheme(currentTheme);
+  showToast('Theme applied');
 });
+
+if (cinematicCheck) {
+  cinematicCheck.addEventListener('change', (e) => {
+    cinematicEnabled = e.target.checked;
+    localStorage.setItem('folio_cinematic', cinematicEnabled);
+    showToast('Cinematic transitions updated');
+  });
+}
 
 function formatKey(key) {
   if (key === ' ') return 'Space';
@@ -271,10 +493,56 @@ function updateKeybindsUI() {
 
 updateKeybindsUI();
 
+/* ── Welcome Parallax ── */
+if (welcome && welcomeBg) {
+  let targetX = 0;
+  let targetY = 0;
+  let currentX = 0;
+  let currentY = 0;
+  let parallaxRaf = 0;
+
+  const tickParallax = () => {
+    const dx = targetX - currentX;
+    const dy = targetY - currentY;
+    currentX += dx * 0.12;
+    currentY += dy * 0.12;
+    welcomeBg.style.setProperty('--parallax-x', `${currentX.toFixed(2)}px`);
+    welcomeBg.style.setProperty('--parallax-y', `${currentY.toFixed(2)}px`);
+
+    if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
+      parallaxRaf = requestAnimationFrame(tickParallax);
+    } else {
+      parallaxRaf = 0;
+    }
+  };
+
+  const scheduleParallax = () => {
+    if (parallaxRaf) return;
+    parallaxRaf = requestAnimationFrame(tickParallax);
+  };
+
+  welcome.addEventListener('mousemove', (e) => {
+    if (welcome.classList.contains('hidden')) return;
+    const rect = welcome.getBoundingClientRect();
+    const nx = (e.clientX - rect.left) / rect.width - 0.5;
+    const ny = (e.clientY - rect.top) / rect.height - 0.5;
+    targetX = nx * 36;
+    targetY = ny * 28;
+    scheduleParallax();
+  });
+
+  welcome.addEventListener('mouseleave', () => {
+    targetX = 0;
+    targetY = 0;
+    scheduleParallax();
+  });
+}
+
 $('resetKeybindsBtn').addEventListener('click', () => {
   keybinds = { ...defaultKeybinds };
   localStorage.setItem('folio_keybinds', JSON.stringify(keybinds));
   updateKeybindsUI();
+  showToast('Keybindings reset to defaults');
 });
 
 let listeningBtn = null;
@@ -314,7 +582,11 @@ function sortItems() {
     if (newIdx !== -1) idx = newIdx;
   }
 
-  buildFilmstrip();
+  if (filmstrip.children.length) {
+    reorderFilmstripWithFlip();
+  } else {
+    buildFilmstrip();
+  }
   highlightThumb();
 }
 
@@ -327,7 +599,7 @@ $('prev').addEventListener('click', () => nav(-1));
 $('next').addEventListener('click', () => nav(1));
 $('zoomReset').addEventListener('click', resetZoom);
 zoomSlider.addEventListener('input', (e) => {
-  setZoom(parseInt(e.target.value) / 100);
+  setZoom(parseInt(e.target.value) / 100, 0, 0, { smooth: false });
 });
 
 /* ── Menu event listeners (Tauri IPC) ── */
@@ -338,6 +610,43 @@ listen('menu-open-folder', () => {
 listen('menu-settings', () => {
   openSettings();
 }).catch(e => console.error('[Folio] Failed to listen for menu-settings:', e));
+
+/* ── Drag & Drop ── */
+getCurrentWindow().onDragDropEvent(async (event) => {
+  if (event.payload.type !== 'drop') return;
+  const paths = event.payload.paths;
+  if (!paths || paths.length === 0) return;
+  
+  try {
+    const droppedPath = paths[0];
+    const pathStr = await invoke('open_specific_folder', { path: droppedPath });
+    
+    const name = pathStr.split('/').pop() || pathStr;
+    const list = await invoke('get_folder_items');
+    if (!list.length) {
+      showToast('No media found in dropped folder');
+      return;
+    }
+    
+    items = list;
+    
+    // Check if the dropped item was a file and jump to it
+    let newIdx = items.findIndex(i => i.path === droppedPath);
+    idx = newIdx !== -1 ? newIdx : 0;
+    
+    sortItems();
+    welcome.classList.add('hidden');
+    sidebar.style.display = 'flex';
+    viewer.style.display = 'flex';
+    applySidebarCollapsed();
+    folderLabel.textContent = name;
+    show(idx);
+    showToast(`Loaded ${items.length} items`);
+  } catch (err) {
+    console.error('[Folio] File drop error:', err);
+    showToast('Error opening dropped file/folder');
+  }
+}).catch(e => console.error('[Folio] Failed to listen for drag-drop:', e));
 
 /* ── Keyboard shortcuts (reliable fallback) ── */
 window.addEventListener('keydown', (e) => {
@@ -385,9 +694,23 @@ window.addEventListener('keydown', (e) => {
     openSettings();
     return;
   }
+  // Cmd+B to toggle sidebar
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+    e.preventDefault();
+    toggleSidebar();
+    return;
+  }
   // Escape to close settings
   if (e.key === 'Escape') {
     closeSettings();
+    return;
+  }
+
+  const tagName = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
+  const isTypingField = ['input', 'textarea', 'select'].includes(tagName);
+  if (!isTypingField && e.key.toLowerCase() === 'f') {
+    e.preventDefault();
+    toggleFullscreen();
     return;
   }
 
@@ -400,7 +723,7 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'End') { e.preventDefault(); show(items.length - 1); }
   else if (k === keybinds.playVideo.toLowerCase()) {
     e.preventDefault();
-    const v = media.querySelector('video');
+    const v = media.querySelector('.media-layer.media-active video');
     if (v) v.paused ? v.play() : v.pause();
   }
   else if (k === keybinds.resetZoom.toLowerCase()) { resetZoom(); }
@@ -411,13 +734,21 @@ window.addEventListener('keydown', (e) => {
 let panX = 0, panY = 0;
 let isDragging = false, startX, startY;
 let pendingRafUpdate = false;
+let targetZoom = 1;
+let zoomRaf = 0;
+let zoomAnchorX = 0;
+let zoomAnchorY = 0;
+
+function getActiveImage() {
+  return media.querySelector('.media-layer.media-active img.media-content');
+}
 
 function scheduleUpdate() {
   if (pendingRafUpdate) return;
   pendingRafUpdate = true;
   requestAnimationFrame(() => {
     pendingRafUpdate = false;
-    const img = media.querySelector('img');
+    const img = getActiveImage();
     if (img) img.style.transform = `translate3d(${panX}px, ${panY}px, 0) scale(${zoom})`;
   });
 }
@@ -428,39 +759,39 @@ media.addEventListener('wheel', (e) => {
   if (!e[modProp]) return;
   e.preventDefault();
 
-  const img = media.querySelector('img');
+  const img = getActiveImage();
   if (!img) return;
 
   const delta = e.deltaY || e.deltaX;
   const sensMultiplier = 0.001 * (zoomSens / 5);
   const scale = Math.exp(-delta * sensMultiplier);
-  let newZoom = zoom * scale;
+  const baseZoom = targetZoom || zoom;
+  let newZoom = baseZoom * scale;
   newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, newZoom));
 
-  if (Math.abs(newZoom - zoom) > 0.001) {
+  if (Math.abs(newZoom - targetZoom) > 0.0005) {
     const rect = media.getBoundingClientRect();
     const cx = e.clientX - rect.left - (rect.width / 2);
     const cy = e.clientY - rect.top - (rect.height / 2);
-    setZoom(newZoom, cx, cy);
+    setZoom(newZoom, cx, cy, { smooth: true });
   }
 }, { passive: false });
 
-function setZoom(level, cx, cy) {
-  const oldZoom = zoom;
-  zoom = level;
-  const img = media.querySelector('img');
+function applyZoom(level, cx, cy, allowSnap = true) {
+  const img = getActiveImage();
   if (!img) return;
 
-  zoomSlider.value = Math.round(zoom * 100);
-  zoomLabel.textContent = Math.round(zoom * 100) + '%';
+  const oldZoom = zoom;
+  const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, level));
+  zoom = clamped;
 
-  if (zoom <= 1.01) {
-    zoom = 1; panX = 0; panY = 0;
+  if (allowSnap && zoom <= 1.01) {
+    zoom = 1;
+    panX = 0;
+    panY = 0;
     img.classList.remove('zoomed');
     img.style.transform = '';
     media.classList.remove('panning');
-    zoomSlider.value = 100;
-    zoomLabel.textContent = '100%';
   } else {
     img.classList.add('zoomed');
     media.classList.add('panning');
@@ -475,10 +806,45 @@ function setZoom(level, cx, cy) {
 
     scheduleUpdate();
   }
+
+  zoomSlider.value = Math.round(zoom * 100);
+  zoomLabel.textContent = Math.round(zoom * 100) + '%';
+}
+
+function setZoom(level, cx, cy, options = {}) {
+  const { smooth = false } = options;
+  targetZoom = level;
+  if (cx !== undefined && cy !== undefined) {
+    zoomAnchorX = cx;
+    zoomAnchorY = cy;
+  }
+
+  if (!smooth) {
+    if (zoomRaf) cancelAnimationFrame(zoomRaf);
+    zoomRaf = 0;
+    applyZoom(level, cx, cy, true);
+    return;
+  }
+
+  if (zoomRaf) return;
+  const step = () => {
+    const diff = targetZoom - zoom;
+    if (Math.abs(diff) < 0.001) {
+      zoomRaf = 0;
+      applyZoom(targetZoom, zoomAnchorX, zoomAnchorY, true);
+      return;
+    }
+    const nextZoom = zoom + diff * 0.2;
+    applyZoom(nextZoom, zoomAnchorX, zoomAnchorY, targetZoom <= 1.01);
+    zoomRaf = requestAnimationFrame(step);
+  };
+  zoomRaf = requestAnimationFrame(step);
 }
 
 /* ── Drag Panning & Window Dragging ── */
 media.addEventListener('mousedown', async (e) => {
+  if (e.detail > 1) e.preventDefault(); // Prevent text selection on double-click
+
   // If not zoomed in and left-clicking, drag the entire window
   if (zoom <= 1 && e.button === 0) {
     e.preventDefault();
@@ -514,7 +880,7 @@ window.addEventListener('mouseup', () => {
 });
 
 function resetZoom() {
-  setZoom(1);
+  setZoom(1, 0, 0, { smooth: false });
 }
 
 /* ── Core ── */
@@ -531,6 +897,7 @@ async function openFolder() {
     welcome.classList.add('hidden');
     sidebar.style.display = 'flex';
     viewer.style.display = 'flex';
+    applySidebarCollapsed();
     folderLabel.textContent = name;
     show(idx);
   } catch (err) { console.error('[Folio] openFolder error:', err); }
@@ -538,59 +905,102 @@ async function openFolder() {
 
 function nav(dir) {
   if (!items.length) return;
-  show((idx + dir + items.length) % items.length);
+  show((idx + dir + items.length) % items.length, dir);
 }
 
-function show(i) {
+function clearMediaContent(keepNode = null) {
+  Array.from(media.children).forEach((child) => {
+    if (mediaLoader && child === mediaLoader) return;
+    if (keepNode && child === keepNode) return;
+    child.remove();
+  });
+}
+
+function applyCinematicExit(node, direction) {
+  node.classList.remove('media-active');
+  node.classList.add('exiting');
+  node.style.setProperty('--cinematic-x', `${direction * -24}px`);
+  const cleanup = () => node.remove();
+  node.addEventListener('transitionend', cleanup, { once: true });
+  setTimeout(cleanup, 520);
+}
+
+function show(i, dir = null) {
+  const prevIdx = idx;
+  const direction = dir !== null ? dir : (i > prevIdx ? 1 : i < prevIdx ? -1 : 0);
   idx = i;
   zoom = 1; panX = 0; panY = 0;
+  targetZoom = 1;
+  if (zoomRaf) {
+    cancelAnimationFrame(zoomRaf);
+    zoomRaf = 0;
+  }
   zoomSlider.value = 100;
   zoomLabel.textContent = '100%';
   media.classList.remove('panning');
 
   const item = items[i];
   const src = `folio://localhost/${encodeURIComponent(item.path)}`;
-  media.innerHTML = '';
+  const shouldCinematic = cinematicEnabled && direction !== 0;
+  const outgoing = shouldCinematic ? media.querySelector('.media-layer.media-active') : null;
+
+  if (outgoing) applyCinematicExit(outgoing, direction);
+  clearMediaContent(outgoing);
+
+  const layer = document.createElement('div');
+  layer.className = 'media-layer media-item media-active';
+
+  if (shouldCinematic) {
+    layer.classList.add('entering');
+    layer.style.setProperty('--cinematic-x', `${direction * 24}px`);
+  }
 
   if (item.is_video) {
+    media.classList.remove('loading');
     const v = document.createElement('video');
+    v.className = 'media-content';
     v.controls = true; v.autoplay = true; v.loop = true;
     v.playsInline = true; v.src = src;
     v.onloadeddata = () => v.classList.add('loaded');
-    media.appendChild(v);
+    layer.appendChild(v);
+    media.appendChild(layer);
+    if (shouldCinematic) requestAnimationFrame(() => layer.classList.remove('entering'));
   } else {
-    // Show cached thumbnail instantly as blurred placeholder
+    media.classList.add('loading');
     const thumbSrc = preloadedThumbs.get(item.path);
     if (thumbSrc) {
       const placeholder = document.createElement('img');
       placeholder.alt = '';
       placeholder.src = thumbSrc;
       placeholder.className = 'placeholder-thumb loaded';
-      media.appendChild(placeholder);
+      layer.appendChild(placeholder);
     }
 
-    // Load the full-resolution image
     const img = document.createElement('img');
     img.alt = '';
     img.decoding = 'async';
-    // Check preload cache first
+    img.className = 'media-content';
+
     const cached = preloadCache.get(item.path);
     if (cached && cached.complete && cached.naturalWidth > 0) {
       img.src = cached.src;
       img.classList.add('loaded');
-      // Remove placeholder immediately
-      const ph = media.querySelector('.placeholder-thumb');
+      media.classList.remove('loading');
+      const ph = layer.querySelector('.placeholder-thumb');
       if (ph) ph.remove();
     } else {
       img.src = src;
       img.onload = () => {
         img.classList.add('loaded');
-        // Fade out placeholder once full image is ready
-        const ph = media.querySelector('.placeholder-thumb');
+        media.classList.remove('loading');
+        const ph = layer.querySelector('.placeholder-thumb');
         if (ph) ph.remove();
       };
     }
-    media.appendChild(img);
+
+    layer.appendChild(img);
+    media.appendChild(layer);
+    if (shouldCinematic) requestAnimationFrame(() => layer.classList.remove('entering'));
   }
 
   const base = item.path.split('/').pop() || '';
@@ -663,9 +1073,39 @@ function cacheThumbUrl(path, url) {
 const THUMB_CONCURRENCY = 8;
 let thumbQueue = [];
 let thumbActive = 0;
+const THUMB_MIN = 160;
+const THUMB_MAX = 480;
+let thumbMaxSide = computeThumbMaxSide();
+updateThumbMaxSide({ force: true });
 
-function enqueueThumb(el, path) {
-  thumbQueue.push({ el, path, retries: 0 });
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function computeThumbMaxSide() {
+  const scale = Math.min(window.devicePixelRatio || 1, 2);
+  const baseWidth = sidebarCollapsed ? sidebarWidth : (sidebar?.getBoundingClientRect().width || sidebarWidth);
+  return Math.round(clamp(baseWidth * scale, THUMB_MIN, THUMB_MAX));
+}
+
+function refreshLoadedThumbs() {
+  const thumbs = filmstrip.querySelectorAll('.thumb');
+  thumbs.forEach((el) => {
+    if (el.dataset.vid === '1') return;
+    if (el.dataset.loaded !== '1') return;
+    enqueueThumb(el, el.dataset.path, true);
+  });
+}
+
+function updateThumbMaxSide({ force = false } = {}) {
+  const next = computeThumbMaxSide();
+  if (!force && next <= thumbMaxSide + 8) return;
+  thumbMaxSide = next;
+  refreshLoadedThumbs();
+}
+
+function enqueueThumb(el, path, force = false) {
+  thumbQueue.push({ el, path, retries: 0, force });
   processThumbQueue();
 }
 
@@ -680,24 +1120,26 @@ async function processThumbQueue() {
   }
 }
 
-async function loadThumb({ el, path, retries }) {
+async function loadThumb({ el, path, retries, force }) {
   try {
-    const tp = await invoke('get_thumbnail', { path, maxSide: 160 });
+    if (!force) {
+      const currentSize = parseInt(el.dataset.thumbSize || '0', 10);
+      if (currentSize >= thumbMaxSide) return;
+    }
+    const tp = await invoke('get_thumbnail', { path, maxSide: thumbMaxSide });
     const thumbUrl = `folio://localhost/${encodeURIComponent(tp)}`;
     const img = el.querySelector('img');
     if (img) {
       img.src = thumbUrl;
       img.onload = () => img.classList.add('loaded');
     }
-    // Cache this URL for use as instant placeholder in the main viewer
+    el.dataset.thumbSize = String(thumbMaxSide);
     cacheThumbUrl(path, thumbUrl);
   } catch (err) {
     if (retries < 2) {
-      // Retry after a short delay — thumbnail may still be generating
       await new Promise(r => setTimeout(r, 500));
       thumbQueue.push({ el, path, retries: retries + 1 });
     } else {
-      // Final fallback: load original directly
       const img = el.querySelector('img');
       if (img) {
         img.src = `folio://localhost/${encodeURIComponent(path)}`;
@@ -770,11 +1212,74 @@ function buildFilmstrip() {
       d.appendChild(img);
     }
 
-    d.addEventListener('click', () => show(i));
+    d.addEventListener('click', () => {
+      const targetIdx = parseInt(d.dataset.index, 10);
+      const dir = targetIdx === idx ? 0 : (targetIdx > idx ? 1 : -1);
+      show(targetIdx, dir);
+    });
     frag.appendChild(d);
     obs.observe(d);
   }
   filmstrip.appendChild(frag);
+}
+
+function reorderFilmstripWithFlip() {
+  const thumbs = Array.from(filmstrip.children).filter(el => el.classList.contains('thumb'));
+  if (!thumbs.length) {
+    buildFilmstrip();
+    return;
+  }
+
+  const firstRects = new Map();
+  thumbs.forEach(t => firstRects.set(t.dataset.path, t.getBoundingClientRect()));
+
+  const nodeByPath = new Map(thumbs.map(t => [t.dataset.path, t]));
+  const frag = document.createDocumentFragment();
+  let missingNode = false;
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const node = nodeByPath.get(item.path);
+    if (!node) {
+      missingNode = true;
+      break;
+    }
+    node.dataset.index = i;
+    frag.appendChild(node);
+  }
+
+  if (missingNode) {
+    buildFilmstrip();
+    return;
+  }
+
+  filmstrip.innerHTML = '';
+  filmstrip.appendChild(frag);
+
+  const lastRects = new Map();
+  for (const item of items) {
+    const node = nodeByPath.get(item.path);
+    if (node) lastRects.set(item.path, node.getBoundingClientRect());
+  }
+
+  for (const item of items) {
+    const node = nodeByPath.get(item.path);
+    const first = firstRects.get(item.path);
+    const last = lastRects.get(item.path);
+    if (!node || !first || !last) continue;
+    const dx = first.left - last.left;
+    const dy = first.top - last.top;
+    if (dx || dy) {
+      node.style.setProperty('--flip-x', `${dx}px`);
+      node.style.setProperty('--flip-y', `${dy}px`);
+      node.style.transition = 'none';
+      requestAnimationFrame(() => {
+        node.style.transition = '';
+        node.style.setProperty('--flip-x', '0px');
+        node.style.setProperty('--flip-y', '0px');
+      });
+    }
+  }
 }
 
 function highlightThumb() {
@@ -782,7 +1287,7 @@ function highlightThumb() {
   thumbs.forEach((t, i) => {
     if (i === idx) {
       t.classList.add('active');
-      t.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      t.scrollIntoView({ behavior: 'smooth', block: 'center' });
     } else {
       t.classList.remove('active');
     }
@@ -866,11 +1371,23 @@ if (autoCheckEnabled) {
 /* ═══ LUXURY UI FEATURES ═══ */
 
 // 1. Custom Magnetic Cursor
-getCurrentWindow().setCursorVisible(false).catch(() => {});
 const customCursor = $('customCursor');
 let cursorVisible = false;
 
 window.addEventListener('mousemove', (e) => {
+  const inTrafficLights = !isFullscreen && e.clientX <= 80 && e.clientY <= 40;
+  if (useCustomCursor) {
+    setTrafficLightHover(inTrafficLights);
+  } else if (trafficLightHover) {
+    setTrafficLightHover(false);
+  }
+
+  if (!useCustomCursor || trafficLightHover) {
+    if (customCursor) customCursor.style.opacity = 0;
+    cursorVisible = false;
+    return;
+  }
+
   if (!cursorVisible) {
     customCursor.style.opacity = 1;
     cursorVisible = true;
@@ -880,7 +1397,7 @@ window.addEventListener('mousemove', (e) => {
   
   // Magnetic effect on interactive elements
   const target = e.target;
-  if (target.closest('button, .thumb, input, select, .welcome-btn, .sidebar-dragbar')) {
+  if (target.closest('button, .thumb, input, select, .welcome-btn, .sidebar-dragbar, .sidebar-toggle')) {
     customCursor.classList.add('hovering');
   } else {
     customCursor.classList.remove('hovering');
@@ -910,7 +1427,19 @@ function toggleEditorialOverlay() {
   }
 }
 
-// 3. Fast Canvas-based Color Extraction for Dynamic Tint
+// 3. Double-Click Smart Zoom
+media.addEventListener('dblclick', (e) => {
+  if (zoom > 1) {
+    resetZoom();
+  } else {
+    const rect = media.getBoundingClientRect();
+    const cx = e.clientX - rect.left - (rect.width / 2);
+    const cy = e.clientY - rect.top - (rect.height / 2);
+    setZoom(2.0, cx, cy, { smooth: false });
+  }
+});
+
+// 4. Fast Canvas-based Color Extraction for Dynamic Tint
 const bgTint = $('bgTint');
 const colorCanvas = document.createElement('canvas');
 const colorCtx = colorCanvas.getContext('2d', { willReadFrequently: true });

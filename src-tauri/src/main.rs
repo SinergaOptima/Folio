@@ -64,6 +64,25 @@ async fn open_folder_picker(state: State<'_, Arc<AppState>>) -> Result<Option<St
 }
 
 #[tauri::command]
+async fn open_specific_folder(path: String, state: State<'_, Arc<AppState>>) -> Result<String, String> {
+    let folder_path = PathBuf::from(&path);
+    let state_arc = state.inner().clone();
+
+    // Heavy work on a blocking thread so the UI stays responsive
+    let path_str = tauri::async_runtime::spawn_blocking(move || {
+        let index = build_index(&folder_path, &state_arc.cache)
+            .map_err(|e| e.to_string())?;
+        let path_str = folder_path.to_string_lossy().to_string();
+        *state_arc.index.write() = Some(index);
+        Ok::<String, String>(path_str)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    Ok(path_str)
+}
+
+#[tauri::command]
 async fn get_folder_items(state: State<'_, Arc<AppState>>) -> Result<Vec<UiItem>, String> {
     let state_arc = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -318,6 +337,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             open_folder_picker,
+            open_specific_folder,
             get_folder_items,
             get_thumbnail
         ])
