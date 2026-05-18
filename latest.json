@@ -1,7 +1,7 @@
 {
-  "version": "1.1.0",
-  "notes": "Added auto-update, optimized performance (especially thumbnail and image loading), implemented light/dark mode settings, and improved UI navigation.",
-  "pub_date": "2026-05-12T16:40:00Z",
+  "version": "1.2.1",
+  "notes": "Added auto-update fix, improved performance, and updated roadmap.",
+  "pub_date": "2026-05-14T10:00:00Z",
   "platforms": {
     "darwin-aarch64": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTUDBJVHpqaGpFR3l4UzlDdENVQTFCSjhRTUlnYXNxb1dqdHNWNzZoaEdJQ1JwMW84N3RBcEZwZXFmQ1VmYS9Yb2Z4VGV3WUo0MUR1NHd4SHJzeTk2a0k5UkdDSE9tZ2c4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc4NTY5MDQ4CWZpbGU6Zm9saW8uYXBwLnRhci5negpSSjcxYXVxV0lvTFRQcUFxR1JrZFlKaDllRmdaS3VNZ2MwS280eHBxL3lNV0ExUUlGeEs1Ynp5VWtJUjRCSDZEbnFxTW5ham9GbUN0K3hjSXVSaFNDZz09Cg==",

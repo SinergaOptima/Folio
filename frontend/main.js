@@ -1,15 +1,19 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { LogicalPosition } from '@tauri-apps/api/dpi';
-import { check } from '@tauri-apps/plugin-updater';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
+import { save, open } from '@tauri-apps/plugin-dialog';
 
 /* ── State ── */
 let items = [];
 let idx = 0;
 let zoom = 1;
+let panX = 0, panY = 0;
+let isDragging = false, startX, startY;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 8;
+let overlayVisible = false;
+let isFullscreen = false;
 
 /* ── DOM ── */
 const app = document.getElementById('app');
@@ -22,7 +26,12 @@ app.innerHTML = `
     <div class="welcome-content">
       <h1>Folio</h1>
       <p class="tagline">Your photography, undistracted.</p>
+      <div class="welcome-dropzone" id="welcomeDropzone">
+        <span class="drop-icon">📥</span>
+        <span class="drop-text">Drop Folder Here</span>
+      </div>
       <button class="welcome-btn" id="openBtn"><span>Open Folder</span></button>
+      <div class="recent-folders" id="recentFolders"></div>
       <div class="welcome-shortcuts">
         <span><kbd>⇧</kbd> + Scroll to Zoom</span>
         <span><kbd>⇧</kbd> + Mid Click to Pan</span>
@@ -33,8 +42,12 @@ app.innerHTML = `
 
   <div class="sidebar" id="sidebar" style="display:none">
     <div class="sidebar-dragbar" id="sDrag" data-tauri-drag-region>
-      <span class="folder-name" id="folderLabel"></span>
+        <div class="breadcrumbs" id="breadcrumbs"></div>
+        <button class="grid-toggle-btn" id="gridToggleBtn" data-tooltip="Toggle Grid View">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+        </button>
     </div>
+
     <div class="sidebar-controls">
       <button class="sidebar-btn" id="openBtn2"><span class="icon">📂</span> Open Folder</button>
     </div>
@@ -52,9 +65,9 @@ app.innerHTML = `
 
   <div class="viewer" id="viewer" style="display:none">
     <div class="viewer-bg-base"></div>
-    <div class="dynamic-bg-tint" id="bgTint"></div>
+    <div class="backdrop-glow" id="backdropGlow"></div>
     <div class="viewer-dragbar" id="vDrag" data-tauri-drag-region></div>
-    <button class="sidebar-toggle" id="sidebarToggle" title="Toggle Sidebar">Sidebar</button>
+    <button class="sidebar-toggle" id="sidebarToggle" data-tooltip="Toggle Sidebar (B)">Sidebar</button>
     <div class="media-wrap" id="media">
       <div class="media-loader" id="mediaLoader" aria-hidden="true">
         <svg class="loader-ring" viewBox="0 0 44 44">
@@ -72,18 +85,40 @@ app.innerHTML = `
         <div class="editorial-stat-group"><span class="editorial-stat-label">ISO</span><span class="editorial-stat-value" id="edIso">—</span></div>
         <div class="editorial-stat-group"><span class="editorial-stat-label">Focal</span><span class="editorial-stat-value" id="edFocal">—</span></div>
       </div>
+      <div class="editorial-tech-data" id="edTechData"></div>
+      <canvas class="editorial-histogram" id="histogramCanvas" width="220" height="56" aria-hidden="true"></canvas>
     </div>
     <button class="nav-arrow prev" id="prev">‹</button>
     <button class="nav-arrow next" id="next">›</button>
     <div class="zoom-hud" id="zoomHud">
       <input type="range" id="zoomSlider" min="100" max="800" value="100" step="10" />
       <span class="zoom-label" id="zoomLabel">100%</span>
-      <button class="zoom-reset" id="zoomReset">FIT</button>
-      <button class="zoom-action fullscreen-toggle" id="fullscreenBtn" title="Enter Fullscreen">FULL</button>
+      <button class="zoom-reset" id="zoomReset" data-tooltip="Fit to Screen (0)">FIT</button>
+      <button class="zoom-action fullscreen-toggle" id="fullscreenBtn" data-tooltip="Enter Fullscreen (F)">FULL</button>
     </div>
+
+    <div class="edit-panel" id="editPanel" aria-hidden="true">
+      <div class="edit-panel-header">
+        <span class="edit-panel-title">Edit Photo</span>
+        <div class="edit-panel-actions">
+          <button class="edit-action-btn" id="editResetBtn">Reset</button>
+          <button class="edit-action-btn edit-export-btn" id="editExportBtn">Export</button>
+          <button class="edit-close-btn" id="editCloseBtn">×</button>
+        </div>
+      </div>
+      <div class="edit-sliders">
+        <div class="edit-row"><label>Brightness</label><input type="range" class="edit-slider" data-param="brightness" min="-100" max="100" step="1" value="0"><span class="edit-val">0</span></div>
+        <div class="edit-row"><label>Vibrance</label><input type="range" class="edit-slider" data-param="vibrance" min="-100" max="100" step="1" value="0"><span class="edit-val">0</span></div>
+      </div>
+      <div class="edit-footer">
+        <button class="edit-flip-btn" id="flipHBtn">Flip Horizontal</button>
+        <button class="edit-flip-btn" id="flipVBtn">Flip Vertical</button>
+      </div>
+    </div>
+    <button class="edit-toggle-btn" id="editToggleBtn" data-tooltip="Edit Photo (E)">Edit</button>
   </div>
 
-  <div class="image-fullscreen" id="imageFullscreen" aria-hidden="true">
+  <div class="image-fullscreen" id="imageFullscreen" aria-hidden="true" style="display:none">
     <div class="image-fullscreen-bg"></div>
     <div class="image-fullscreen-ui">
       <button class="image-fullscreen-exit" id="imageFsExit">Exit</button>
@@ -115,20 +150,14 @@ app.innerHTML = `
             </select>
           </div>
           <div class="setting-row">
-            <label for="zoomSensSlider">Zoom Sensitivity</label>
-            <input type="range" id="zoomSensSlider" min="1" max="10" value="5" />
-          </div>
-          <div class="sidebar-divider" style="margin: 4px 0"></div>
-          <div class="setting-row">
-            <label for="autoUpdateCheck">Check for updates on startup</label>
-            <input type="checkbox" id="autoUpdateCheck" checked />
+           <label for="zoomSensSlider">Zoom Sensitivity</label>
+           <input type="range" id="zoomSensSlider" min="1" max="10" value="5" />
           </div>
           <div class="setting-row">
-            <label>Updates</label>
-            <button class="settings-update-btn" id="checkUpdateBtn">Check Now</button>
+            <label for="recentFoldersCheck">Show Recent Folders</label>
+            <input type="checkbox" id="recentFoldersCheck" checked />
           </div>
         </div>
-
         <div class="tab-pane" id="tab-appearance">
           <div class="setting-row">
             <label for="themeSelect">Theme</label>
@@ -136,6 +165,10 @@ app.innerHTML = `
               <option value="dark">Dark</option>
               <option value="light">Light</option>
             </select>
+          </div>
+          <div class="setting-row">
+            <label for="vibrancyCheck">Enable Window Vibrancy</label>
+            <input type="checkbox" id="vibrancyCheck" />
           </div>
           <div class="setting-row">
             <label for="customCursorCheck">Use Custom Cursor</label>
@@ -192,92 +225,106 @@ app.innerHTML = `
   </div>
 
   <div class="custom-cursor" id="customCursor"></div>
+  <div class="dropzone-glow" id="dropzoneGlow"></div>
   <div id="toastContainer" class="toast-container"></div>
 `;
 
+/* ── DOM REFS ── */
 const $ = id => document.getElementById(id);
-const welcome   = $('welcome');
-const welcomeBg = $('welcomeBg');
-const sidebar   = $('sidebar');
-const sidebarResizer = $('sidebarResizer');
-const sidebarToggle  = $('sidebarToggle');
-const viewer    = $('viewer');
-const filmstrip = $('filmstrip');
-const media     = $('media');
-const mediaLoader = $('mediaLoader');
-const counter   = $('counter');
-const fname     = $('fname');
-const dims      = $('dims');
-const badge     = $('badge');
-const folderLabel = $('folderLabel');
-const zoomSlider  = $('zoomSlider');
-const zoomLabel   = $('zoomLabel');
-const fullscreenBtn = $('fullscreenBtn');
-const imageFullscreen = $('imageFullscreen');
-const imageFsExit = $('imageFsExit');
-const imageFsHint = $('imageFsHint');
+const welcome = $('welcome'), welcomeBg = $('welcomeBg'), sidebar = $('sidebar'), sidebarResizer = $('sidebarResizer'), sidebarToggle = $('sidebarToggle'), viewer = $('viewer'), media = $('media'), mediaLoader = $('mediaLoader'), filmstrip = $('filmstrip'), breadcrumbs = $('breadcrumbs'), gridToggleBtn = $('gridToggleBtn'), counter = $('counter'), fname = $('fname'), dims = $('dims'), badge = $('badge'), edOverlay = $('editorialOverlay'), edCamera = $('edCamera'), edAperture = $('edAperture'), edShutter = $('edShutter'), edIso = $('edIso'), edFocal = $('edFocal'), edTechData = $('edTechData'), backdropGlow = $('backdropGlow'), editPanel = $('editPanel'), editToggleBtn = $('editToggleBtn'), editCloseBtn = $('editCloseBtn'), editResetBtn = $('editResetBtn'), editExportBtn = $('editExportBtn'), flipHBtn = $('flipHBtn'), flipVBtn = $('flipVBtn'), customCursor = $('customCursor'), customCursorCheck = $('customCursorCheck'), dropzoneGlow = $('dropzoneGlow'), zoomSlider = $('zoomSlider'), zoomLabel = $('zoomLabel'), zoomReset = $('zoomReset'), fullscreenBtn = $('fullscreenBtn'), imageFsExit = $('imageFsExit'), sortSelect = $('sortSelect'), zoomSensSlider = $('zoomSensSlider'), themeSelect = $('themeSelect'), cinematicCheck = $('cinematicCheck'), recentFoldersCheck = $('recentFoldersCheck'), vibrancyCheck = $('vibrancyCheck');
 
-/* ── Settings Logic ── */
+/* ── Settings & State ── */
 let currentSort = localStorage.getItem('folio_sort') || 'name';
 let zoomSens = parseFloat(localStorage.getItem('folio_zoom_sens')) || 5;
 let currentTheme = localStorage.getItem('folio_theme') || 'dark';
 let cinematicEnabled = localStorage.getItem('folio_cinematic') !== 'false';
+let useCustomCursor = localStorage.getItem('folio_custom_cursor') !== 'false';
+let showRecentFolders = localStorage.getItem('folio_show_recents') !== 'false';
+let vibrancyEnabled = localStorage.getItem('folio_vibrancy') === 'true';
+let gridView = localStorage.getItem('folio_grid_view') === 'true';
 
-const defaultKeybinds = {
-  nextImage: 'ArrowRight',
-  prevImage: 'ArrowLeft',
-  resetZoom: '0',
-  toggleMetadata: 'i',
-  playVideo: ' ',
-  modifierZoom: 'Shift',
-  modifierPan: 'Shift'
-};
+let trafficLightHover = false;
+let pendingRafUpdate = false;
+let editPanelOpen = false;
+let editDebounceTimer = null;
+let editPreviewImg = null;
+const editMap = new Map();
+const preloadedThumbs = new Map();
+const preloadCache = new Map();
+
+const defaultKeybinds = { nextImage: 'ArrowRight', prevImage: 'ArrowLeft', resetZoom: '0', toggleMetadata: 'i', playVideo: ' ', modifierZoom: 'Shift', modifierPan: 'Shift' };
 let keybinds = { ...defaultKeybinds, ...JSON.parse(localStorage.getItem('folio_keybinds') || '{}') };
 
-const sortSelect = $('sortSelect');
-const zoomSensSlider = $('zoomSensSlider');
-const themeSelect = $('themeSelect');
-const cinematicCheck = $('cinematicCheck');
+/* ── Init ── */
+applyTheme(currentTheme);
+if (recentFoldersCheck) {
+  recentFoldersCheck.checked = showRecentFolders;
+  recentFoldersCheck.addEventListener('change', (e) => {
+    showRecentFolders = e.target.checked;
+    localStorage.setItem('folio_show_recents', showRecentFolders);
+    renderRecentFolders();
+  });
+}
+if (vibrancyCheck) {
+  vibrancyCheck.checked = vibrancyEnabled;
+  vibrancyCheck.addEventListener('change', (e) => {
+    vibrancyEnabled = e.target.checked;
+    localStorage.setItem('folio_vibrancy', vibrancyEnabled);
+    invoke('set_window_vibrancy', { enabled: vibrancyEnabled });
+  });
+}
+// Apply initial vibrancy if enabled
+if (vibrancyEnabled) invoke('set_window_vibrancy', { enabled: true });
 
-sortSelect.value = currentSort;
-zoomSensSlider.value = zoomSens;
-themeSelect.value = currentTheme;
-if (cinematicCheck) cinematicCheck.checked = cinematicEnabled;
-
+/* ── Core UI Methods ── */
 function applyTheme(theme) {
   const root = document.documentElement.style;
   if (theme === 'light') {
-    root.setProperty('--bg-deep', '#f4f4f5');
-    root.setProperty('--bg-sidebar', 'rgba(250, 250, 250, 0.92)');
-    root.setProperty('--text-primary', '#18181b');
-    root.setProperty('--text-secondary', 'rgba(0, 0, 0, 0.6)');
-    root.setProperty('--text-tertiary', 'rgba(0, 0, 0, 0.4)');
-    root.setProperty('--border-subtle', 'rgba(0, 0, 0, 0.08)');
-    root.setProperty('--modal-bg', 'rgba(255, 255, 255, 0.88)');
-    root.setProperty('--input-bg', 'rgba(0, 0, 0, 0.06)');
+    root.setProperty('--bg-deep', '#f5f5f6');
+    root.setProperty('--bg-sidebar', 'rgba(250, 250, 250, 0.94)');
+    root.setProperty('--text-primary', '#1a1a1e');
+    root.setProperty('--text-secondary', 'rgba(0, 0, 0, 0.55)');
+    root.setProperty('--text-tertiary', 'rgba(0, 0, 0, 0.35)');
+    root.setProperty('--border-subtle', 'rgba(0, 0, 0, 0.07)');
+    root.setProperty('--modal-bg', 'rgba(255, 255, 255, 0.9)');
+    root.setProperty('--input-bg', 'rgba(0, 0, 0, 0.05)');
     root.setProperty('--overlay-bg', 'rgba(0, 0, 0, 0.2)');
   } else {
-    root.setProperty('--bg-deep', '#09090b');
-    root.setProperty('--bg-sidebar', 'rgba(13, 13, 15, 0.92)');
-    root.setProperty('--text-primary', '#ececf0');
-    root.setProperty('--text-secondary', 'rgba(255, 255, 255, 0.5)');
-    root.setProperty('--text-tertiary', 'rgba(255, 255, 255, 0.25)');
-    root.setProperty('--border-subtle', 'rgba(255, 255, 255, 0.055)');
-    root.setProperty('--modal-bg', 'rgba(20, 20, 22, 0.85)');
+    root.setProperty('--bg-deep', '#08080a');
+    root.setProperty('--bg-sidebar', 'rgba(12, 12, 14, 0.94)');
+    root.setProperty('--text-primary', '#f0f0f4');
+    root.setProperty('--text-secondary', 'rgba(255, 255, 255, 0.48)');
+    root.setProperty('--text-tertiary', 'rgba(255, 255, 255, 0.22)');
+    root.setProperty('--border-subtle', 'rgba(255, 255, 255, 0.06)');
+    root.setProperty('--modal-bg', 'rgba(18, 18, 20, 0.88)');
     root.setProperty('--input-bg', 'rgba(255, 255, 255, 0.06)');
-    root.setProperty('--overlay-bg', 'rgba(0, 0, 0, 0.4)');
+    root.setProperty('--overlay-bg', 'rgba(0, 0, 0, 0.45)');
   }
 }
-applyTheme(currentTheme);
 
-function openSettings() {
-  $('settingsModal').style.display = 'flex';
-}
-function closeSettings() {
-  $('settingsModal').style.display = 'none';
-}
+/* ── Tooltips ── */
+let tooltipEl = null;
+function initTooltips() {
+  tooltipEl = document.createElement('div');
+  tooltipEl.className = 'folio-tooltip';
+  document.body.appendChild(tooltipEl);
 
-// Toast Notifications
+  window.addEventListener('mouseover', (e) => {
+    const target = e.target.closest('[data-tooltip]');
+    if (!target) {
+      tooltipEl.classList.remove('visible');
+      return;
+    }
+    tooltipEl.textContent = target.dataset.tooltip;
+    tooltipEl.classList.add('visible');
+    const r = target.getBoundingClientRect();
+    tooltipEl.style.left = `${r.left + r.width/2}px`;
+    tooltipEl.style.top = `${r.top - 8}px`;
+  });
+}
+initTooltips();
+
+let activeToasts = [];
 function showToast(message) {
   const container = $('toastContainer');
   if (!container) return;
@@ -285,45 +332,37 @@ function showToast(message) {
   toast.className = 'toast';
   toast.textContent = message;
   container.appendChild(toast);
+  activeToasts.push(toast);
+  
+  const type = message.toLowerCase().includes('fail') || message.toLowerCase().includes('error') ? 'error' : 'success';
+  invoke('trigger_macos_sound', { name: type }).catch(()=>{});
+
+  const updateStack = () => {
+    activeToasts.forEach((t, i) => {
+      const offset = (activeToasts.length - 1 - i) * 44;
+      t.style.transform = `translateY(${-offset}px)`;
+    });
+  };
+  updateStack();
+
   setTimeout(() => {
     toast.classList.add('hiding');
-    setTimeout(() => toast.remove(), 300);
+    setTimeout(() => {
+      activeToasts = activeToasts.filter(t => t !== toast);
+      toast.remove();
+      updateStack();
+    }, 300);
   }, 3000);
 }
 
-// Settings Tabs Logic
-document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', (e) => {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-    e.target.classList.add('active');
-    $('tab-' + e.target.dataset.tab).classList.add('active');
-  });
-});
-
-// Custom Cursor Preference
-let useCustomCursor = localStorage.getItem('folio_custom_cursor') !== 'false';
-let trafficLightHover = false;
-let isFullscreen = false;
-const customCursorCheck = $('customCursorCheck');
-if (customCursorCheck) {
-  customCursorCheck.checked = useCustomCursor;
-  customCursorCheck.addEventListener('change', (e) => {
-    useCustomCursor = e.target.checked;
-    localStorage.setItem('folio_custom_cursor', useCustomCursor);
-    updateCursorVisibility();
-    showToast('Cursor preference saved');
-  });
-}
+function openSettings() { $('settingsModal').style.display = 'flex'; }
+function closeSettings() { $('settingsModal').style.display = 'none'; }
 
 function updateCursorVisibility() {
   const shouldShowNative = !useCustomCursor || trafficLightHover;
   document.body.classList.toggle('force-native-cursor', shouldShowNative);
   getCurrentWindow().setCursorVisible(shouldShowNative).catch(() => {});
-  if (shouldShowNative) {
-    const customCursor = $('customCursor');
-    if (customCursor) customCursor.style.opacity = 0;
-  }
+  if (customCursor) customCursor.style.opacity = shouldShowNative ? 0 : 1;
 }
 
 function setTrafficLightHover(active) {
@@ -333,1136 +372,671 @@ function setTrafficLightHover(active) {
 }
 updateCursorVisibility();
 
-/* ── Sidebar Width & Collapse ── */
-const SIDEBAR_MIN = 200;
-const SIDEBAR_MAX = 500;
-let sidebarWidth = parseFloat(localStorage.getItem('folio_sidebar_w')) || 220;
-let sidebarCollapsed = localStorage.getItem('folio_sidebar_collapsed') === 'true';
-
-function clampSidebarWidth(value) {
-  return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, value));
-}
-
-function setSidebarWidth(value, persist = true) {
-  sidebarWidth = clampSidebarWidth(value);
-  document.documentElement.style.setProperty('--sidebar-w', `${sidebarWidth}px`);
-  if (persist) localStorage.setItem('folio_sidebar_w', sidebarWidth);
-}
-
-function applySidebarCollapsed() {
-  if (!sidebar) return;
-  sidebar.classList.toggle('collapsed', sidebarCollapsed);
-  if (sidebarToggle) {
-    sidebarToggle.classList.toggle('collapsed', sidebarCollapsed);
-    const label = sidebarCollapsed ? 'Show' : 'Hide';
-    sidebarToggle.textContent = label;
-    sidebarToggle.title = `${label} Sidebar`;
-  }
-  localStorage.setItem('folio_sidebar_collapsed', sidebarCollapsed);
-}
-
-function toggleSidebar() {
-  sidebarCollapsed = !sidebarCollapsed;
-  applySidebarCollapsed();
-}
-
-setSidebarWidth(sidebarWidth);
-applySidebarCollapsed();
-
-if (sidebarToggle) {
-  sidebarToggle.addEventListener('click', toggleSidebar);
-}
-
 async function syncFullscreenState() {
-  try {
-    isFullscreen = await getCurrentWindow().isFullscreen();
-  } catch {
-    isFullscreen = false;
-  }
-  if (isFullscreen && trafficLightHover) {
-    trafficLightHover = false;
-    updateCursorVisibility();
-  }
+  try { isFullscreen = await getCurrentWindow().isFullscreen(); } catch { isFullscreen = false; }
+  if (isFullscreen && trafficLightHover) { trafficLightHover = false; updateCursorVisibility(); }
   if (fullscreenBtn) {
     fullscreenBtn.classList.toggle('active', isFullscreen);
     fullscreenBtn.textContent = isFullscreen ? 'EXIT' : 'FULL';
-    fullscreenBtn.title = isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen';
   }
 }
 
 async function toggleFullscreen() {
-  try {
-    await getCurrentWindow().setFullscreen(!isFullscreen);
-    await syncFullscreenState();
-  } catch (err) {
-    console.error('[Folio] Fullscreen toggle failed:', err);
-  }
+  try { await getCurrentWindow().setFullscreen(!isFullscreen); await syncFullscreenState(); } catch (err) { console.error(err); }
 }
 
-if (fullscreenBtn) {
-  fullscreenBtn.addEventListener('click', () => {
-    toggleFullscreen();
-  });
-}
-syncFullscreenState();
-
-if (sidebarResizer) {
-  let resizing = false;
-  let startX = 0;
-  let startWidth = 0;
-
-  sidebarResizer.addEventListener('mousedown', (e) => {
-    if (sidebarCollapsed) return;
-    resizing = true;
-    startX = e.clientX;
-    startWidth = sidebar.getBoundingClientRect().width;
-    sidebarResizer.classList.add('dragging');
-    document.body.style.cursor = 'ew-resize';
-    e.preventDefault();
-  });
-
-  window.addEventListener('mousemove', (e) => {
-    if (!resizing) return;
-    const dx = e.clientX - startX;
-    setSidebarWidth(startWidth + dx);
-  });
-
-  window.addEventListener('mouseup', () => {
-    if (!resizing) return;
-    resizing = false;
-    sidebarResizer.classList.remove('dragging');
-    document.body.style.cursor = '';
-    updateThumbMaxSide();
-  });
-}
-
-sortSelect.addEventListener('change', (e) => {
-  currentSort = e.target.value;
-  localStorage.setItem('folio_sort', currentSort);
-  sortItems();
-  showToast('Sort order changed');
-});
-zoomSensSlider.addEventListener('input', (e) => {
-  zoomSens = parseFloat(e.target.value);
-  localStorage.setItem('folio_zoom_sens', zoomSens);
-});
-themeSelect.addEventListener('change', (e) => {
-  currentTheme = e.target.value;
-  localStorage.setItem('folio_theme', currentTheme);
-  applyTheme(currentTheme);
-  showToast('Theme applied');
-});
-
-if (cinematicCheck) {
-  cinematicCheck.addEventListener('change', (e) => {
-    cinematicEnabled = e.target.checked;
-    localStorage.setItem('folio_cinematic', cinematicEnabled);
-    showToast('Cinematic transitions updated');
-  });
-}
-
-function formatKey(key) {
-  if (key === ' ') return 'Space';
-  if (key === 'ArrowRight') return '→';
-  if (key === 'ArrowLeft') return '←';
-  if (key === 'ArrowUp') return '↑';
-  if (key === 'ArrowDown') return '↓';
-  if (key === 'Escape') return 'Esc';
-  if (key === 'Shift') return '⇧';
-  if (key === 'Control') return '⌃';
-  if (key === 'Alt') return '⌥';
-  if (key === 'Meta') return '⌘';
-  return key.length === 1 ? key.toUpperCase() : key;
-}
-
-function updateKeybindsUI() {
-  document.querySelectorAll('.keybind-btn').forEach(btn => {
-    const action = btn.dataset.action;
-    btn.textContent = formatKey(keybinds[action]);
-  });
-  
-  const shortcuts = document.querySelector('.welcome-shortcuts');
-  if (shortcuts) {
-    shortcuts.innerHTML = `
-      <span><kbd>${formatKey(keybinds.modifierZoom)}</kbd> + Scroll to Zoom</span>
-      <span><kbd>${formatKey(keybinds.modifierPan)}</kbd> + Mid Click to Pan</span>
-      <span>Drag to Move Window</span>
-    `;
-  }
-}
-
-updateKeybindsUI();
-
-/* ── Welcome Parallax ── */
-if (welcome && welcomeBg) {
-  let targetX = 0;
-  let targetY = 0;
-  let currentX = 0;
-  let currentY = 0;
-  let parallaxRaf = 0;
-
-  const tickParallax = () => {
-    const dx = targetX - currentX;
-    const dy = targetY - currentY;
-    currentX += dx * 0.12;
-    currentY += dy * 0.12;
-    welcomeBg.style.setProperty('--parallax-x', `${currentX.toFixed(2)}px`);
-    welcomeBg.style.setProperty('--parallax-y', `${currentY.toFixed(2)}px`);
-
-    if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
-      parallaxRaf = requestAnimationFrame(tickParallax);
-    } else {
-      parallaxRaf = 0;
-    }
-  };
-
-  const scheduleParallax = () => {
-    if (parallaxRaf) return;
-    parallaxRaf = requestAnimationFrame(tickParallax);
-  };
-
-  welcome.addEventListener('mousemove', (e) => {
-    if (welcome.classList.contains('hidden')) return;
-    const rect = welcome.getBoundingClientRect();
-    const nx = (e.clientX - rect.left) / rect.width - 0.5;
-    const ny = (e.clientY - rect.top) / rect.height - 0.5;
-    targetX = nx * 36;
-    targetY = ny * 28;
-    scheduleParallax();
-  });
-
-  welcome.addEventListener('mouseleave', () => {
-    targetX = 0;
-    targetY = 0;
-    scheduleParallax();
-  });
-}
-
-$('resetKeybindsBtn').addEventListener('click', () => {
-  keybinds = { ...defaultKeybinds };
-  localStorage.setItem('folio_keybinds', JSON.stringify(keybinds));
-  updateKeybindsUI();
-  showToast('Keybindings reset to defaults');
-});
-
-let listeningBtn = null;
-document.querySelectorAll('.keybind-btn').forEach(btn => {
-  btn.addEventListener('click', (e) => {
-    if (listeningBtn) {
-      listeningBtn.textContent = formatKey(keybinds[listeningBtn.dataset.action]);
-      listeningBtn.classList.remove('listening');
-    }
-    listeningBtn = btn;
-    btn.textContent = 'Press key...';
-    btn.classList.add('listening');
-    e.stopPropagation();
-  });
-});
-
-
-function sortItems() {
-  if (!items.length) return;
-  const currentPath = items[idx]?.path;
-
-  items.sort((a, b) => {
-    if (currentSort === 'name') {
-      const nameA = a.path.split('/').pop().toLowerCase();
-      const nameB = b.path.split('/').pop().toLowerCase();
-      return nameA.localeCompare(nameB);
-    } else if (currentSort === 'size') {
-      return b.size - a.size;
-    } else if (currentSort === 'date') {
-      return b.modified - a.modified;
-    }
-    return 0;
-  });
-
-  if (currentPath) {
-    const newIdx = items.findIndex(i => i.path === currentPath);
-    if (newIdx !== -1) idx = newIdx;
-  }
-
-  if (filmstrip.children.length) {
-    reorderFilmstripWithFlip();
-  } else {
-    buildFilmstrip();
-  }
-  highlightThumb();
-}
-
-/* ── Events ── */
-$('openBtn').addEventListener('click', openFolder);
-$('openBtn2').addEventListener('click', openFolder);
-$('settingsClose').addEventListener('click', closeSettings);
-$('settingsBg').addEventListener('click', closeSettings);
-$('prev').addEventListener('click', () => nav(-1));
-$('next').addEventListener('click', () => nav(1));
-$('zoomReset').addEventListener('click', resetZoom);
-zoomSlider.addEventListener('input', (e) => {
-  setZoom(parseInt(e.target.value) / 100, 0, 0, { smooth: false });
-});
-
-/* ── Menu event listeners (Tauri IPC) ── */
-listen('menu-open-folder', () => {
-  openFolder();
-}).catch(e => console.error('[Folio] Failed to listen for menu-open-folder:', e));
-
-listen('menu-settings', () => {
-  openSettings();
-}).catch(e => console.error('[Folio] Failed to listen for menu-settings:', e));
-
-/* ── Drag & Drop ── */
-getCurrentWindow().onDragDropEvent(async (event) => {
-  if (event.payload.type !== 'drop') return;
-  const paths = event.payload.paths;
-  if (!paths || paths.length === 0) return;
-  
-  try {
-    const droppedPath = paths[0];
-    const pathStr = await invoke('open_specific_folder', { path: droppedPath });
-    
-    const name = pathStr.split('/').pop() || pathStr;
-    const list = await invoke('get_folder_items');
-    if (!list.length) {
-      showToast('No media found in dropped folder');
-      return;
-    }
-    
-    items = list;
-    
-    // Check if the dropped item was a file and jump to it
-    let newIdx = items.findIndex(i => i.path === droppedPath);
-    idx = newIdx !== -1 ? newIdx : 0;
-    
-    sortItems();
-    welcome.classList.add('hidden');
-    sidebar.style.display = 'flex';
-    viewer.style.display = 'flex';
-    applySidebarCollapsed();
-    folderLabel.textContent = name;
-    show(idx);
-    showToast(`Loaded ${items.length} items`);
-  } catch (err) {
-    console.error('[Folio] File drop error:', err);
-    showToast('Error opening dropped file/folder');
-  }
-}).catch(e => console.error('[Folio] Failed to listen for drag-drop:', e));
-
-/* ── Keyboard shortcuts (reliable fallback) ── */
-window.addEventListener('keydown', (e) => {
-  if (listeningBtn) {
-    e.preventDefault();
-    if (e.key === 'Escape') {
-      listeningBtn.textContent = formatKey(keybinds[listeningBtn.dataset.action]);
-      listeningBtn.classList.remove('listening');
-      listeningBtn = null;
-      return;
-    }
-    const action = listeningBtn.dataset.action;
-    let key = e.key;
-    if (action.startsWith('modifier')) {
-      if (!['Shift', 'Control', 'Alt', 'Meta'].includes(key)) {
-        listeningBtn.textContent = 'Must be Shift/Ctrl/Alt/Cmd';
-        const resetBtn = listeningBtn;
-        setTimeout(() => {
-          if (listeningBtn === resetBtn) {
-            listeningBtn.textContent = formatKey(keybinds[action]);
-            listeningBtn.classList.remove('listening');
-            listeningBtn = null;
-          }
-        }, 1000);
-        return;
-      }
-    }
-    keybinds[action] = key;
-    localStorage.setItem('folio_keybinds', JSON.stringify(keybinds));
-    updateKeybindsUI();
-    listeningBtn.classList.remove('listening');
-    listeningBtn = null;
-    return;
-  }
-
-  // Cmd+O to open folder
-  if ((e.metaKey || e.ctrlKey) && e.key === 'o') {
-    e.preventDefault();
-    openFolder();
-    return;
-  }
-  // Cmd+, to open settings
-  if ((e.metaKey || e.ctrlKey) && e.key === ',') {
-    e.preventDefault();
-    openSettings();
-    return;
-  }
-  // Cmd+B to toggle sidebar
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
-    e.preventDefault();
-    toggleSidebar();
-    return;
-  }
-  // Escape to close settings
-  if (e.key === 'Escape') {
-    closeSettings();
-    return;
-  }
-
-  const tagName = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
-  const isTypingField = ['input', 'textarea', 'select'].includes(tagName);
-  if (!isTypingField && e.key.toLowerCase() === 'f') {
-    e.preventDefault();
-    toggleFullscreen();
-    return;
-  }
-
-  if (!items.length) return;
-  const k = e.key.toLowerCase();
-  
-  if (k === keybinds.nextImage.toLowerCase() || e.key === 'ArrowDown') { e.preventDefault(); nav(1); }
-  else if (k === keybinds.prevImage.toLowerCase() || e.key === 'ArrowUp') { e.preventDefault(); nav(-1); }
-  else if (e.key === 'Home') { e.preventDefault(); show(0); }
-  else if (e.key === 'End') { e.preventDefault(); show(items.length - 1); }
-  else if (k === keybinds.playVideo.toLowerCase()) {
-    e.preventDefault();
-    const v = media.querySelector('.media-layer.media-active video');
-    if (v) v.paused ? v.play() : v.pause();
-  }
-  else if (k === keybinds.resetZoom.toLowerCase()) { resetZoom(); }
-  else if (k === keybinds.toggleMetadata.toLowerCase()) { toggleEditorialOverlay(); }
-});
-
-/* ── Zoom/Pan State ── */
-let panX = 0, panY = 0;
-let isDragging = false, startX, startY;
-let pendingRafUpdate = false;
-let targetZoom = 1;
-let zoomRaf = 0;
-let zoomAnchorX = 0;
-let zoomAnchorY = 0;
-
-function getActiveImage() {
-  return media.querySelector('.media-layer.media-active img.media-content');
-}
+/* ── Viewport & Zoom/Pan ── */
+function getActiveImage() { return media.querySelector('.media-layer.media-active img.media-content'); }
 
 function scheduleUpdate() {
-  if (pendingRafUpdate) return;
-  pendingRafUpdate = true;
+  if (pendingRafUpdate) return; pendingRafUpdate = true;
   requestAnimationFrame(() => {
     pendingRafUpdate = false;
     const img = getActiveImage();
-    if (img) img.style.transform = `translate3d(${panX}px, ${panY}px, 0) scale(${zoom})`;
+    if (img) {
+      const t = `translate3d(${panX}px, ${panY}px, 0) scale(${zoom})`;
+      img.style.transform = t;
+      if (editPreviewImg && editPreviewImg.parentElement === img.parentElement) editPreviewImg.style.transform = t;
+    }
   });
 }
 
-/* ── Shift+Scroll Zoom ── */
-media.addEventListener('wheel', (e) => {
-  const modProp = keybinds.modifierZoom.toLowerCase() + 'Key';
-  if (!e[modProp]) return;
-  e.preventDefault();
 
+
+function setZoom(level, cx, cy, opts = {}) {
+  const oldZ = zoom;
+  zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, level));
   const img = getActiveImage();
-  if (!img) return;
-
-  const delta = e.deltaY || e.deltaX;
-  const sensMultiplier = 0.001 * (zoomSens / 5);
-  const scale = Math.exp(-delta * sensMultiplier);
-  const baseZoom = targetZoom || zoom;
-  let newZoom = baseZoom * scale;
-  newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, newZoom));
-
-  if (Math.abs(newZoom - targetZoom) > 0.0005) {
-    const rect = media.getBoundingClientRect();
-    const cx = e.clientX - rect.left - (rect.width / 2);
-    const cy = e.clientY - rect.top - (rect.height / 2);
-    setZoom(newZoom, cx, cy, { smooth: true });
-  }
-}, { passive: false });
-
-function applyZoom(level, cx, cy, allowSnap = true) {
-  const img = getActiveImage();
-  if (!img) return;
-
-  const oldZoom = zoom;
-  const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, level));
-  zoom = clamped;
-
-  if (allowSnap && zoom <= 1.01) {
-    zoom = 1;
-    panX = 0;
-    panY = 0;
-    img.classList.remove('zoomed');
-    img.style.transform = '';
-    media.classList.remove('panning');
-  } else {
-    img.classList.add('zoomed');
-    media.classList.add('panning');
-
-    if (cx !== undefined && cy !== undefined) {
-      const dx = cx - panX;
-      const dy = cy - panY;
-      const ratio = zoom / oldZoom;
-      panX = cx - dx * ratio;
-      panY = cy - dy * ratio;
+  if (img) {
+    if (zoom <= 1.01) {
+      zoom = 1; panX = 0; panY = 0;
+      img.classList.remove('zoomed'); img.style.transform = '';
+      if (editPreviewImg) editPreviewImg.style.transform = '';
+    } else {
+      img.classList.add('zoomed');
+      if (cx !== undefined && cy !== undefined) {
+        const ratio = zoom / oldZ;
+        panX = cx - (cx - panX) * ratio;
+        panY = cy - (cy - panY) * ratio;
+      }
+      scheduleUpdate();
     }
-
-    scheduleUpdate();
   }
-
   zoomSlider.value = Math.round(zoom * 100);
   zoomLabel.textContent = Math.round(zoom * 100) + '%';
 }
 
-function setZoom(level, cx, cy, options = {}) {
-  const { smooth = false } = options;
-  targetZoom = level;
-  if (cx !== undefined && cy !== undefined) {
-    zoomAnchorX = cx;
-    zoomAnchorY = cy;
-  }
-
-  if (!smooth) {
-    if (zoomRaf) cancelAnimationFrame(zoomRaf);
-    zoomRaf = 0;
-    applyZoom(level, cx, cy, true);
+function resetZoom() { setZoom(1, 0, 0, { smooth: false }); }
+async function renderRecentFolders() {
+  const container = $('recentFolders');
+  if (!container) return;
+  if (!showRecentFolders) {
+    container.innerHTML = '';
     return;
   }
 
-  if (zoomRaf) return;
-  const step = () => {
-    const diff = targetZoom - zoom;
-    if (Math.abs(diff) < 0.001) {
-      zoomRaf = 0;
-      applyZoom(targetZoom, zoomAnchorX, zoomAnchorY, true);
+  try {
+    const list = await invoke('get_recent_folders');
+    if (!list || list.length === 0) {
+      container.innerHTML = '';
       return;
     }
-    const nextZoom = zoom + diff * 0.2;
-    applyZoom(nextZoom, zoomAnchorX, zoomAnchorY, targetZoom <= 1.01);
-    zoomRaf = requestAnimationFrame(step);
-  };
-  zoomRaf = requestAnimationFrame(step);
-}
 
-/* ── Drag Panning & Window Dragging ── */
-media.addEventListener('mousedown', async (e) => {
-  if (e.detail > 1) e.preventDefault(); // Prevent text selection on double-click
-
-  // If not zoomed in and left-clicking, drag the entire window
-  if (zoom <= 1 && e.button === 0) {
-    e.preventDefault();
-    getCurrentWindow().startDragging();
-    return;
+    container.innerHTML = '<div class="recents-title">Recent Folders</div>';
+    list.forEach(path => {
+      const card = document.createElement('div');
+      card.className = 'recent-card';
+      const name = path.split('/').pop() || path;
+      card.innerHTML = `
+        <span class="recent-name">${name}</span>
+        <span class="recent-path">${path}</span>
+      `;
+      card.addEventListener('click', async () => {
+        try {
+          const p = await invoke('open_specific_folder', { path });
+          loadFolderData(p);
+        } catch (e) {
+          showToast('Failed to open recent folder');
+          console.error(e);
+        }
+      });
+      container.appendChild(card);
+    });
+  } catch (e) {
+    console.error('[Folio] Failed to fetch recents:', e);
   }
-
-  // Panning is allowed if zoomed in, AND either:
-  // - Left click (e.button === 0)
-  // - Modifier + Middle click (e.button === 1 && e[modProp])
-  const modProp = keybinds.modifierPan.toLowerCase() + 'Key';
-  const isPanClick = (e.button === 0) || (e.button === 1 && e[modProp]);
-  
-  if (zoom <= 1 || !isPanClick) return;
-  
-  // Prevent default to stop weird scrolling/selection behavior
-  if (e.button === 1) e.preventDefault();
-
-  isDragging = true;
-  startX = e.clientX - panX;
-  startY = e.clientY - panY;
-});
-
-window.addEventListener('mousemove', (e) => {
-  if (!isDragging) return;
-  panX = e.clientX - startX;
-  panY = e.clientY - startY;
-  scheduleUpdate();
-});
-
-window.addEventListener('mouseup', () => {
-  isDragging = false;
-});
-
-function resetZoom() {
-  setZoom(1, 0, 0, { smooth: false });
 }
 
-/* ── Core ── */
-async function openFolder() {
-  try {
-    const path = await invoke('open_folder_picker');
-    if (!path) return;
-    const name = path.split('/').pop() || path;
-    const list = await invoke('get_folder_items');
-    if (!list.length) return;
-    items = list;
-    idx = 0;
-    sortItems();
-    welcome.classList.add('hidden');
-    sidebar.style.display = 'flex';
-    viewer.style.display = 'flex';
-    applySidebarCollapsed();
-    folderLabel.textContent = name;
-    show(idx);
-  } catch (err) { console.error('[Folio] openFolder error:', err); }
+async function loadFolderData(p) {
+  items = await invoke('get_folder_items');
+  idx = 0; sortItems();
+  welcome.classList.add('hidden');
+  sidebar.style.display = viewer.style.display = 'flex';
+  renderBreadcrumbs(p);
+  show(idx);
+  invoke('trigger_macos_sound', { name: 'load' }).catch(()=>{});
 }
 
-function nav(dir) {
-  if (!items.length) return;
-  show((idx + dir + items.length) % items.length, dir);
-}
+function renderBreadcrumbs(path) {
+  if (!breadcrumbs) return;
+  breadcrumbs.innerHTML = '';
+  const parts = path.split('/').filter(Boolean);
+  let currentAccum = '';
+  if (path.startsWith('/')) currentAccum = '/';
 
-function clearMediaContent(keepNode = null) {
-  Array.from(media.children).forEach((child) => {
-    if (mediaLoader && child === mediaLoader) return;
-    if (keepNode && child === keepNode) return;
-    child.remove();
+  parts.forEach((p, i) => {
+    const crumb = document.createElement('span');
+    crumb.className = 'crumb';
+    crumb.textContent = p;
+    currentAccum += p;
+    const target = currentAccum;
+    crumb.onclick = async () => {
+        try {
+            const res = await invoke('open_specific_folder', { path: target });
+            loadFolderData(res);
+        } catch(e) { console.error(e); }
+    };
+    breadcrumbs.appendChild(crumb);
+    if (i < parts.length - 1) {
+        const sep = document.createElement('span');
+        sep.className = 'crumb-sep';
+        sep.textContent = '›';
+        breadcrumbs.appendChild(sep);
+    }
+    currentAccum += '/';
   });
 }
 
-function applyCinematicExit(node, direction) {
+/* ── Core Logic ── */
+async function openFolder() {
+    try {
+        const p = await invoke('open_folder_picker');
+        if (!p) return;
+        await invoke('add_recent_folder', { path: p });
+        loadFolderData(p);
+    } catch (e) { console.error(e); }
+}
+
+
+function nav(dir) { if (items.length) show((idx + dir + items.length) % items.length, dir); }
+
+function clearMediaContent(keep = null) {
+  Array.from(media.children).forEach(c => { if (c !== mediaLoader && c !== keep) c.remove(); });
+}
+
+function applyPhysicalExit(node, dir) {
   node.classList.remove('media-active');
-  node.classList.add('exiting');
-  node.style.setProperty('--cinematic-x', `${direction * -24}px`);
-  const cleanup = () => node.remove();
-  node.addEventListener('transitionend', cleanup, { once: true });
-  setTimeout(cleanup, 520);
+  node.style.zIndex = '1';
+  node.animate([
+    { opacity: 1, transform: 'translate3d(0, 0, 0) scale(1) rotate(0deg)' },
+    { opacity: 0, transform: `translate3d(${dir * -60}px, 0, 0) scale(0.97) rotate(${dir * -1}deg)` }
+  ], { duration: 700, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards' }).finished.then(() => node.remove());
 }
 
 function show(i, dir = null) {
-  const prevIdx = idx;
-  const direction = dir !== null ? dir : (i > prevIdx ? 1 : i < prevIdx ? -1 : 0);
-  idx = i;
-  zoom = 1; panX = 0; panY = 0;
-  targetZoom = 1;
-  if (zoomRaf) {
-    cancelAnimationFrame(zoomRaf);
-    zoomRaf = 0;
-  }
-  zoomSlider.value = 100;
-  zoomLabel.textContent = '100%';
-  media.classList.remove('panning');
-
-  const item = items[i];
-  const src = `folio://localhost/${encodeURIComponent(item.path)}`;
-  const shouldCinematic = cinematicEnabled && direction !== 0;
-  const outgoing = shouldCinematic ? media.querySelector('.media-layer.media-active') : null;
-
-  if (outgoing) applyCinematicExit(outgoing, direction);
+  const prevIdx = idx, direction = dir !== null ? dir : (i > prevIdx ? 1 : i < prevIdx ? -1 : 0);
+  idx = i; zoom = 1; panX = 0; panY = 0;
+  zoomSlider.value = 100; zoomLabel.textContent = '100%';
+  
+  const item = items[i], src = `folio://localhost/${encodeURIComponent(item.path)}`, outgoing = media.querySelector('.media-layer.media-active');
+  if (outgoing) { if (cinematicEnabled && direction !== 0) applyPhysicalExit(outgoing, direction); else outgoing.remove(); }
   clearMediaContent(outgoing);
-
-  const layer = document.createElement('div');
-  layer.className = 'media-layer media-item media-active';
-
-  if (shouldCinematic) {
-    layer.classList.add('entering');
-    layer.style.setProperty('--cinematic-x', `${direction * 24}px`);
+  
+  const layer = document.createElement('div'); layer.className = 'media-layer media-active';
+  layer.style.zIndex = '2';
+  
+  if (cinematicEnabled && direction !== 0) {
+    requestAnimationFrame(() => layer.animate([
+        { opacity: 0, transform: `translate3d(${direction * 50}%, 0, 0) scale(1.02) rotate(${direction * 1.5}deg)` },
+        { opacity: 1, transform: 'translate3d(0, 0, 0) scale(1) rotate(0deg)' }
+    ], { duration: 750, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'forwards' }));
+  } else {
+    layer.style.opacity = '1';
+    layer.style.transform = 'none';
   }
-
+  
   if (item.is_video) {
-    media.classList.remove('loading');
+    viewer.classList.remove('loading');
     const v = document.createElement('video');
     v.className = 'media-content';
-    v.controls = true; v.autoplay = true; v.loop = true;
-    v.playsInline = true; v.src = src;
-    v.onloadeddata = () => v.classList.add('loaded');
+    v.autoplay = true; v.loop = true; v.playsInline = true; v.src = src;
+    v.onloadeddata = () => {
+      v.classList.add('loaded');
+      const ctrl = document.createElement('div');
+      ctrl.className = 'video-controls';
+      ctrl.innerHTML = `<button class="v-play-btn">⏸</button><input type="range" class="v-progress" value="0" min="0" max="100"><span class="v-time">0:00</span>`;
+      const playBtn = ctrl.querySelector('.v-play-btn'), progress = ctrl.querySelector('.v-progress'), time = ctrl.querySelector('.v-time');
+      playBtn.onclick = () => { if (v.paused) { v.play(); playBtn.textContent = '⏸'; } else { v.pause(); playBtn.textContent = '▶'; } };
+      v.ontimeupdate = () => { const p = (v.currentTime / v.duration) * 100; progress.value = p; const mins = Math.floor(v.currentTime / 60), secs = Math.floor(v.currentTime % 60); time.textContent = `${mins}:${secs.toString().padStart(2, '0')}`; };
+      progress.oninput = () => { v.currentTime = (progress.value / 100) * v.duration; };
+      layer.appendChild(ctrl);
+      updateAdaptiveGlow(v);
+    };
     layer.appendChild(v);
     media.appendChild(layer);
-    if (shouldCinematic) requestAnimationFrame(() => layer.classList.remove('entering'));
   } else {
-    media.classList.add('loading');
-    const thumbSrc = preloadedThumbs.get(item.path);
-    if (thumbSrc) {
-      const placeholder = document.createElement('img');
-      placeholder.alt = '';
-      placeholder.src = thumbSrc;
-      placeholder.className = 'placeholder-thumb loaded';
-      layer.appendChild(placeholder);
-    }
-
-    const img = document.createElement('img');
-    img.alt = '';
-    img.decoding = 'async';
-    img.className = 'media-content';
-
-    const cached = preloadCache.get(item.path);
-    if (cached && cached.complete && cached.naturalWidth > 0) {
-      img.src = cached.src;
-      img.classList.add('loaded');
-      media.classList.remove('loading');
-      const ph = layer.querySelector('.placeholder-thumb');
-      if (ph) ph.remove();
-    } else {
-      img.src = src;
-      img.onload = () => {
+    viewer.classList.add('loading'); const ts = preloadedThumbs.get(item.path);
+    if (ts) { const ph = document.createElement('img'); ph.src = ts; ph.className = 'placeholder-thumb loaded'; layer.appendChild(ph); }
+    const img = document.createElement('img'); img.alt = ''; img.className = 'media-content';
+    const onImgReady = () => {
         img.classList.add('loaded');
-        media.classList.remove('loading');
+        img.style.opacity = '1';
+        viewer.classList.remove('loading');
         const ph = layer.querySelector('.placeholder-thumb');
         if (ph) ph.remove();
-      };
-    }
+        updateAdaptiveGlow(img);
+        if (editPanelOpen) invoke('prepare_edit_preview', { path: item.path }).then(() => loadEditForCurrent()).catch(e => console.error(e));
+        if (overlayVisible) drawHistogram(img);
+    };
+    img.onload = onImgReady;
+    img.onerror = onImgReady;
 
+    if (!['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'].includes(item.path.split('.').pop().toLowerCase())) {
+        invoke('get_full_image', { path: item.path }).then(p => { img.src = `folio://localhost/${encodeURIComponent(p)}`; }).catch(() => { img.src = src; });
+    } else {
+        const cached = preloadCache.get(item.path);
+        if (cached && cached.complete && cached.naturalWidth > 0) { img.src = cached.src; onImgReady(); }
+        else { img.src = src; }
+    }
     layer.appendChild(img);
     media.appendChild(layer);
-    if (shouldCinematic) requestAnimationFrame(() => layer.classList.remove('entering'));
   }
 
-  const base = item.path.split('/').pop() || '';
-  const ext = base.split('.').pop().toLowerCase();
+  // Update UI Chrome
   counter.textContent = `${i + 1} of ${items.length}`;
-  fname.textContent = base;
+  fname.textContent = item.path.split('/').pop();
   dims.textContent = `${item.width} × ${item.height}`;
   badge.style.display = 'inline-block';
-  badge.textContent = ext.toUpperCase();
-  badge.className = `format-badge fmt-${ext}`;
-
-  // Populate Editorial Metadata
+  badge.textContent = (item.path.split('.').pop() || '').toUpperCase();
+  badge.className = `format-badge fmt-${badge.textContent.toLowerCase()}`;
+  
   if (item.exif) {
     edCamera.textContent = item.exif.camera || 'Unknown Camera';
     edAperture.textContent = item.exif.aperture || '—';
     edShutter.textContent = item.exif.shutter_speed || '—';
     edIso.textContent = item.exif.iso || '—';
     edFocal.textContent = item.exif.focal_length || '—';
+    const isRaw = !['jpg','jpeg','png','webp'].includes(item.path.split('.').pop().toLowerCase());
+    if (isRaw && edTechData) { edTechData.style.display = 'block'; edTechData.innerHTML = `<span>Format: ${badge.textContent}</span><span>Bit Depth: 14-bit</span>`; }
+    else if (edTechData) edTechData.style.display = 'none';
   } else {
-    edCamera.textContent = 'No Metadata';
-    edAperture.textContent = '—';
-    edShutter.textContent = '—';
-    edIso.textContent = '—';
-    edFocal.textContent = '—';
+    edCamera.textContent = 'No Metadata'; edAperture.textContent = edShutter.textContent = edIso.textContent = edFocal.textContent = '—';
+    if (edTechData) edTechData.style.display = 'none';
   }
-
-  // Extract color for background tint
-  if (!item.is_video && currentTheme === 'dark') {
-    const thumbSrc = preloadedThumbs.get(item.path);
-    if (thumbSrc) {
-      const tempImg = new Image();
-      tempImg.src = thumbSrc;
-      tempImg.onload = () => {
-        bgTint.style.background = extractDominantColor(tempImg);
-        bgTint.style.opacity = 1;
-      };
-    } else {
-      bgTint.style.opacity = 0;
-    }
-  } else {
-    bgTint.style.opacity = 0;
-  }
-
+  
   highlightThumb();
-
-  // Preload neighbors
-  for (let offset = 1; offset <= 3; offset++) preloadImage(i + offset);
-  for (let offset = 1; offset <= 2; offset++) preloadImage(i - offset);
+  removeEditPreview();
 }
 
-/* ── Preload cache ── */
-const preloadCache = new Map();
-const preloadedThumbs = new Map();
-
-function preloadImage(targetIdx) {
-  if (targetIdx < 0 || targetIdx >= items.length) return;
-  const item = items[targetIdx];
-  if (item.is_video) return;
-  if (preloadCache.has(item.path)) return; // already preloading/preloaded
-  const img = new Image();
-  img.src = `folio://localhost/${encodeURIComponent(item.path)}`;
-  preloadCache.set(item.path, img);
+function updateAdaptiveGlow(el) {
+    if (!backdropGlow) return;
+    const color = extractDominantColor(el);
+    backdropGlow.style.background = `radial-gradient(circle at 50% 50%, ${color} 0%, transparent 70%)`;
 }
 
-function cacheThumbUrl(path, url) {
-  preloadedThumbs.set(path, url);
-}
-
-/* ── Filmstrip with concurrency-limited thumbnail loading ── */
-const THUMB_CONCURRENCY = 8;
-let thumbQueue = [];
-let thumbActive = 0;
-const THUMB_MIN = 160;
-const THUMB_MAX = 480;
-let thumbMaxSide = computeThumbMaxSide();
-updateThumbMaxSide({ force: true });
-
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function computeThumbMaxSide() {
-  const scale = Math.min(window.devicePixelRatio || 1, 2);
-  const baseWidth = sidebarCollapsed ? sidebarWidth : (sidebar?.getBoundingClientRect().width || sidebarWidth);
-  return Math.round(clamp(baseWidth * scale, THUMB_MIN, THUMB_MAX));
-}
-
-function refreshLoadedThumbs() {
-  const thumbs = filmstrip.querySelectorAll('.thumb');
-  thumbs.forEach((el) => {
-    if (el.dataset.vid === '1') return;
-    if (el.dataset.loaded !== '1') return;
-    enqueueThumb(el, el.dataset.path, true);
-  });
-}
-
-function updateThumbMaxSide({ force = false } = {}) {
-  const next = computeThumbMaxSide();
-  if (!force && next <= thumbMaxSide + 8) return;
-  thumbMaxSide = next;
-  refreshLoadedThumbs();
-}
-
-function enqueueThumb(el, path, force = false) {
-  thumbQueue.push({ el, path, retries: 0, force });
-  processThumbQueue();
-}
-
-async function processThumbQueue() {
-  while (thumbActive < THUMB_CONCURRENCY && thumbQueue.length > 0) {
-    const job = thumbQueue.shift();
-    thumbActive++;
-    loadThumb(job).finally(() => {
-      thumbActive--;
-      processThumbQueue();
-    });
-  }
-}
-
-async function loadThumb({ el, path, retries, force }) {
-  try {
-    if (!force) {
-      const currentSize = parseInt(el.dataset.thumbSize || '0', 10);
-      if (currentSize >= thumbMaxSide) return;
-    }
-    const tp = await invoke('get_thumbnail', { path, maxSide: thumbMaxSide });
-    const thumbUrl = `folio://localhost/${encodeURIComponent(tp)}`;
+/* ── Filmstrip ── */
+const THUMB_CONCURRENCY = 12; let thumbQueue = [], thumbActive = 0, thumbMaxSide = 320;
+function enqueueThumb(el, p) { thumbQueue.push({ el, path: p, retries: 0 }); processThumbQueue(); }
+async function processThumbQueue() { while (thumbActive < THUMB_CONCURRENCY && thumbQueue.length > 0) { const j = thumbQueue.shift(); thumbActive++; loadThumb(j).finally(() => { thumbActive--; processThumbQueue(); }); } }
+async function loadThumb({ el, path, retries }) {
+  const fallback = () => {
     const img = el.querySelector('img');
     if (img) {
-      img.src = thumbUrl;
       img.onload = () => img.classList.add('loaded');
+      img.onerror = () => img.classList.add('loaded'); // Show something even if it fails
+      img.src = `folio://localhost/${encodeURIComponent(path)}`;
     }
-    el.dataset.thumbSize = String(thumbMaxSide);
-    cacheThumbUrl(path, thumbUrl);
+  };
+
+  try {
+    const tp = await invoke('get_thumbnail', { path, maxSide: thumbMaxSide });
+    const u = `folio://localhost/${encodeURIComponent(tp)}`;
+    const img = el.querySelector('img');
+    if (img) {
+      img.onload = () => img.classList.add('loaded');
+      img.onerror = fallback;
+      img.src = u;
+    }
+    preloadedThumbs.set(path, u);
   } catch (err) {
     if (retries < 2) {
       await new Promise(r => setTimeout(r, 500));
       thumbQueue.push({ el, path, retries: retries + 1 });
     } else {
-      const img = el.querySelector('img');
-      if (img) {
-        img.src = `folio://localhost/${encodeURIComponent(path)}`;
-        img.onload = () => img.classList.add('loaded');
-      }
+      fallback();
     }
   }
 }
-
 const obs = new IntersectionObserver((entries) => {
-  for (const en of entries) {
-    if (!en.isIntersecting) continue;
-    const el = en.target;
-    if (el.dataset.loaded) continue;
-    el.dataset.loaded = '1';
-
-    const path = el.dataset.path;
-    const isVid = el.dataset.vid === '1';
-
-    if (isVid) {
-      const v = el.querySelector('video');
-      if (v) {
-        v.src = `folio://localhost/${encodeURIComponent(path)}`;
-        v.addEventListener('loadeddata', () => {
-          v.currentTime = Math.min(1, v.duration || 0);
-          v.classList.add('loaded');
-        }, { once: true });
-      }
-    } else {
-      enqueueThumb(el, path);
-    }
-    obs.unobserve(el);
-  }
-}, { root: filmstrip, rootMargin: '400px 0px' });
+  for (const en of entries) { if (en.isIntersecting && !en.target.dataset.loaded) { en.target.dataset.loaded = '1'; enqueueThumb(en.target, en.target.dataset.path); obs.unobserve(en.target); } }
+}, { root: filmstrip, rootMargin: '1000px 0px' });
 
 function buildFilmstrip() {
-  obs.disconnect();
-  thumbQueue = [];
-  thumbActive = 0;
-  filmstrip.innerHTML = '';
-  const frag = document.createDocumentFragment();
-
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
-    const d = document.createElement('div');
-    d.className = i === idx ? 'thumb active' : 'thumb';
-    d.dataset.index = i;
-    d.dataset.path = item.path;
-    d.dataset.vid = item.is_video ? '1' : '0';
-
-    if (item.is_video) {
-      const v = document.createElement('video');
-      v.muted = true;
-      v.preload = 'auto';
-      v.playsInline = true;
-      d.appendChild(v);
-
-      const play = document.createElement('div');
-      play.className = 'play-icon';
-      play.textContent = '▶';
-      d.appendChild(play);
-
-      const b = document.createElement('span');
-      b.className = 'vid-badge';
-      b.textContent = item.path.split('.').pop().toUpperCase();
-      d.appendChild(b);
+  obs.disconnect(); filmstrip.innerHTML = '';
+  filmstrip.classList.toggle('grid-view', gridView);
+  gridToggleBtn?.classList.toggle('active', gridView);
+  
+  items.forEach((it, i) => {
+    const d = document.createElement('div'); d.className = i === idx ? 'thumb active' : 'thumb'; d.dataset.path = it.path;
+    d.onclick = () => show(i, i === idx ? 0 : (i > idx ? 1 : -1));
+    
+    if (it.is_video) {
+        const v = document.createElement('video');
+        v.muted = true; v.loop = true; v.playsInline = true;
+        d.appendChild(v);
+        
+        d.addEventListener('mouseenter', () => { if (!v.src) v.src = `folio://localhost/${encodeURIComponent(it.path)}`; v.play().catch(()=>{}); });
+        d.addEventListener('mouseleave', () => { v.pause(); });
+        
+        const icon = document.createElement('div');
+        icon.className = 'vid-icon-small';
+        icon.innerHTML = '▶';
+        d.appendChild(icon);
     } else {
-      const img = document.createElement('img');
-      img.alt = '';
-      d.appendChild(img);
+        const img = document.createElement('img'); d.appendChild(img);
     }
-
-    d.addEventListener('click', () => {
-      const targetIdx = parseInt(d.dataset.index, 10);
-      const dir = targetIdx === idx ? 0 : (targetIdx > idx ? 1 : -1);
-      show(targetIdx, dir);
-    });
-    frag.appendChild(d);
-    obs.observe(d);
-  }
-  filmstrip.appendChild(frag);
-}
-
-function reorderFilmstripWithFlip() {
-  const thumbs = Array.from(filmstrip.children).filter(el => el.classList.contains('thumb'));
-  if (!thumbs.length) {
-    buildFilmstrip();
-    return;
-  }
-
-  const firstRects = new Map();
-  thumbs.forEach(t => firstRects.set(t.dataset.path, t.getBoundingClientRect()));
-
-  const nodeByPath = new Map(thumbs.map(t => [t.dataset.path, t]));
-  const frag = document.createDocumentFragment();
-  let missingNode = false;
-
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
-    const node = nodeByPath.get(item.path);
-    if (!node) {
-      missingNode = true;
-      break;
-    }
-    node.dataset.index = i;
-    frag.appendChild(node);
-  }
-
-  if (missingNode) {
-    buildFilmstrip();
-    return;
-  }
-
-  filmstrip.innerHTML = '';
-  filmstrip.appendChild(frag);
-
-  const lastRects = new Map();
-  for (const item of items) {
-    const node = nodeByPath.get(item.path);
-    if (node) lastRects.set(item.path, node.getBoundingClientRect());
-  }
-
-  for (const item of items) {
-    const node = nodeByPath.get(item.path);
-    const first = firstRects.get(item.path);
-    const last = lastRects.get(item.path);
-    if (!node || !first || !last) continue;
-    const dx = first.left - last.left;
-    const dy = first.top - last.top;
-    if (dx || dy) {
-      node.style.setProperty('--flip-x', `${dx}px`);
-      node.style.setProperty('--flip-y', `${dy}px`);
-      node.style.transition = 'none';
-      requestAnimationFrame(() => {
-        node.style.transition = '';
-        node.style.setProperty('--flip-x', '0px');
-        node.style.setProperty('--flip-y', '0px');
-      });
-    }
-  }
-}
-
-function highlightThumb() {
-  const thumbs = filmstrip.querySelectorAll('.thumb');
-  thumbs.forEach((t, i) => {
-    if (i === idx) {
-      t.classList.add('active');
-      t.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    } else {
-      t.classList.remove('active');
-    }
+    filmstrip.appendChild(d); obs.observe(d);
   });
 }
 
-/* ── Auto-Update ── */
-let pendingUpdate = null;
-const autoUpdateCheckbox = $('autoUpdateCheck');
-const autoCheckEnabled = localStorage.getItem('folio_auto_update') !== 'false';
-autoUpdateCheckbox.checked = autoCheckEnabled;
+function highlightThumb() { document.querySelectorAll('.thumb').forEach((t, i) => { if (i === idx) { t.classList.add('active'); filmstrip.scrollTop = t.offsetTop - filmstrip.clientHeight/2 + t.clientHeight/2; } else t.classList.remove('active'); }); }
 
-autoUpdateCheckbox.addEventListener('change', (e) => {
-  localStorage.setItem('folio_auto_update', e.target.checked);
-});
+/* ── Simple Edit Engine ── */
+const defaultEdit = () => ({ brightness: 0, vibrance: 0, flip_h: false, flip_v: false });
+function getCurrentEdit() { return editMap.get(items[idx]?.path) || defaultEdit(); }
+function setCurrentEdit(edit) { if (items[idx]?.path) { editMap.set(items[idx].path, edit); invoke('set_edit', { path: items[idx].path, edit }).catch(() => {}); } }
 
-$('checkUpdateBtn').addEventListener('click', () => {
-  checkForUpdates(true);
-});
+async function openEditPanel() {
+  const path = items[idx]?.path; if (!path || items[idx]?.is_video) return;
+  editPanelOpen = true; editPanel.classList.add('visible'); editPanel.setAttribute('aria-hidden', 'false'); editToggleBtn.classList.add('active');
+  requestAnimationFrame(() => { if (zoom <= 1) resetZoom(); else scheduleUpdate(); });
+  try { await invoke('prepare_edit_preview', { path }); loadEditForCurrent(); } catch (e) { console.error(e); }
+}
 
-$('updateAction').addEventListener('click', async () => {
-  if (!pendingUpdate) return;
-  $('updateText').textContent = 'Downloading update...';
-  $('updateAction').disabled = true;
-  try {
-    await pendingUpdate.downloadAndInstall((progress) => {
-      if (progress.event === 'Progress') {
-        const pct = Math.round((progress.data.chunkLength / progress.data.contentLength) * 100);
-        $('updateText').textContent = `Downloading... ${pct}%`;
+function closeEditPanel() {
+  editPanelOpen = false; editPanel.classList.remove('visible'); editPanel.setAttribute('aria-hidden', 'true'); editToggleBtn.classList.remove('active'); removeEditPreview();
+  requestAnimationFrame(() => { if (zoom <= 1) resetZoom(); else scheduleUpdate(); });
+}
+
+function loadEditForCurrent() {
+  const e = getCurrentEdit();
+  document.querySelectorAll('.edit-slider').forEach(s => {
+    const v = e[s.dataset.param] ?? 0; s.value = v;
+    const valEl = s.closest('.edit-row')?.querySelector('.edit-val');
+    if (valEl) valEl.textContent = Math.round(v);
+  });
+  flipHBtn?.classList.toggle('active', e.flip_h);
+  flipVBtn?.classList.toggle('active', e.flip_v);
+  applyEditPreview(e);
+}
+
+function removeEditPreview() { if (editPreviewImg) { editPreviewImg.remove(); editPreviewImg = null; } }
+
+async function applyEditPreview(edit) {
+  const path = items[idx]?.path; if (!path || !editPanelOpen) return;
+  const layer = media.querySelector('.media-layer.media-active'); if (!layer) return;
+  clearTimeout(editDebounceTimer);
+  editDebounceTimer = setTimeout(async () => {
+    try {
+      const b64 = await invoke('edit_image', { path, edit });
+      if (!editPreviewImg) {
+        editPreviewImg = document.createElement('img');
+        editPreviewImg.className = 'media-content edit-preview loaded';
+        editPreviewImg.style.cssText = 'position:absolute;inset:0;margin:auto;z-index:2;width:100%;height:100%;object-fit:contain;pointer-events:none;';
+        layer.appendChild(editPreviewImg);
       }
-    });
-    $('updateText').textContent = 'Update installed! Restarting...';
-    // The app will restart automatically after install
-  } catch (err) {
-    console.error('[Folio] Update install failed:', err);
-    $('updateText').textContent = 'Update failed. Try again later.';
-    $('updateAction').disabled = false;
-  }
-});
-
-$('updateDismiss').addEventListener('click', () => {
-  $('updateBar').style.display = 'none';
-  pendingUpdate = null;
-});
-
-async function checkForUpdates(manual = false) {
-  try {
-    const update = await check();
-    if (update) {
-      pendingUpdate = update;
-      $('updateText').textContent = `Update available: v${update.version}`;
-      $('updateBar').style.display = 'flex';
-    } else if (manual) {
-      $('updateText').textContent = 'You\'re on the latest version!';
-      $('updateBar').style.display = 'flex';
-      $('updateAction').style.display = 'none';
-      setTimeout(() => {
-        $('updateBar').style.display = 'none';
-        $('updateAction').style.display = '';
-      }, 3000);
-    }
-  } catch (err) {
-    console.log('[Folio] Update check skipped:', err.message || err);
-    if (manual) {
-      $('updateText').textContent = 'Could not check for updates.';
-      $('updateBar').style.display = 'flex';
-      $('updateAction').style.display = 'none';
-      setTimeout(() => {
-        $('updateBar').style.display = 'none';
-        $('updateAction').style.display = '';
-      }, 3000);
-    }
-  }
+      editPreviewImg.src = 'data:image/jpeg;base64,' + b64;
+    } catch (e) { console.error(e); }
+  }, 16);
 }
 
-// Auto-check on startup (with short delay so UI loads first)
-if (autoCheckEnabled) {
-  setTimeout(() => checkForUpdates(false), 2000);
-}
+/* ── Interactive Listeners ── */
+$('openBtn').addEventListener('click', openFolder);
+$('openBtn2').addEventListener('click', openFolder);
+$('prev').addEventListener('click', () => nav(-1));
+$('next').addEventListener('click', () => nav(1));
+$('settingsClose').addEventListener('click', closeSettings);
+$('settingsBg').addEventListener('click', closeSettings);
+zoomSlider?.addEventListener('input', (e) => setZoom(parseInt(e.target.value) / 100, 0, 0));
+zoomReset?.addEventListener('click', resetZoom);
+fullscreenBtn?.addEventListener('click', toggleFullscreen);
 
-/* ═══ LUXURY UI FEATURES ═══ */
+sidebarToggle.addEventListener('click', () => {
+  const visible = sidebar.style.display !== 'none';
+  sidebar.style.display = visible ? 'none' : 'flex';
+  sidebarToggle.classList.toggle('active', !visible);
+  sidebarToggle.textContent = !visible ? 'Close' : 'Sidebar';
+  requestAnimationFrame(() => { if (zoom > 1) scheduleUpdate(); else resetZoom(); });
+});
 
-// 1. Custom Magnetic Cursor
-const customCursor = $('customCursor');
-let cursorVisible = false;
+gridToggleBtn?.addEventListener('click', () => {
+  gridView = !gridView;
+  localStorage.setItem('folio_grid_view', gridView);
+  buildFilmstrip();
+});
+
+let isResizingSidebar = false;
+sidebarResizer.addEventListener('mousedown', (e) => {
+  isResizingSidebar = true;
+  document.body.style.cursor = 'ew-resize';
+  sidebarResizer.classList.add('dragging');
+});
 
 window.addEventListener('mousemove', (e) => {
-  const inTrafficLights = !isFullscreen && e.clientX <= 80 && e.clientY <= 40;
-  if (useCustomCursor) {
-    setTrafficLightHover(inTrafficLights);
-  } else if (trafficLightHover) {
-    setTrafficLightHover(false);
-  }
+  if (!isResizingSidebar) return;
+  const newWidth = Math.min(450, Math.max(180, e.clientX));
+  document.documentElement.style.setProperty('--sidebar-w', `${newWidth}px`);
+});
 
-  if (!useCustomCursor || trafficLightHover) {
-    if (customCursor) customCursor.style.opacity = 0;
-    cursorVisible = false;
+window.addEventListener('mouseup', () => {
+  if (isResizingSidebar) {
+    isResizingSidebar = false;
+    document.body.style.cursor = '';
+    sidebarResizer.classList.remove('dragging');
+  }
+});
+
+editToggleBtn.addEventListener('click', () => { if (editPanelOpen) closeEditPanel(); else openEditPanel(); });
+editCloseBtn?.addEventListener('click', closeEditPanel);
+editResetBtn.addEventListener('click', () => { const p = items[idx]?.path; if (!p) return; editMap.set(p, defaultEdit()); loadEditForCurrent(); showToast('Edit reset'); });
+
+flipHBtn.addEventListener('click', () => { const e = getCurrentEdit(); e.flip_h = !e.flip_h; setCurrentEdit(e); loadEditForCurrent(); });
+flipVBtn.addEventListener('click', () => { const e = getCurrentEdit(); e.flip_v = !e.flip_v; setCurrentEdit(e); loadEditForCurrent(); });
+
+editExportBtn?.addEventListener('click', async () => {
+  const p = items[idx]?.path; if (!p) return;
+  try {
+    const dest = await save({ defaultPath: p.replace(/(\\.[^.]+)\$/, '_edited$1'), filters: [{ name: 'Image', extensions: ['jpg', 'jpeg', 'png', 'tiff'] }] });
+    if (dest) { await invoke('export_edited', { path: p, dest }); showToast('Exported successfully'); }
+  } catch (e) { showToast('Export failed'); }
+});
+
+document.querySelectorAll('.edit-slider').forEach(s => {
+  s.addEventListener('input', () => {
+    const val = parseFloat(s.value);
+    const valEl = s.closest('.edit-row')?.querySelector('.edit-val');
+    if (valEl) valEl.textContent = Math.round(val);
+    const e = getCurrentEdit(); e[s.dataset.param] = val; setCurrentEdit(e); applyEditPreview(e);
+  });
+});
+
+/* ── Global Handlers ── */
+window.addEventListener('mousemove', (e) => {
+  const inTL = !isFullscreen && e.clientX <= 80 && e.clientY <= 40;
+  if (useCustomCursor) setTrafficLightHover(inTL);
+  if (!useCustomCursor || trafficLightHover) { if (customCursor) customCursor.style.opacity = 0; return; }
+  if (customCursor) {
+    customCursor.style.opacity = 1;
+    customCursor.style.transform = `translate(${e.clientX}px, ${e.clientY}px)`;
+    customCursor.classList.toggle('hovering', !!e.target.closest('button, .thumb, input, select, .welcome-btn, .sidebar-dragbar'));
+  }
+});
+
+media.addEventListener('wheel', (e) => {
+  const img = getActiveImage(); if (!img) return;
+  
+  if (e.ctrlKey) {
+    // Native Trackpad Pinch-to-Zoom
+    e.preventDefault();
+    const scale = Math.exp(-e.deltaY * 0.01);
+    setZoom(zoom * scale, e.clientX - media.offsetWidth/2, e.clientY - media.offsetHeight/2);
     return;
   }
 
-  if (!cursorVisible) {
-    customCursor.style.opacity = 1;
-    cursorVisible = true;
+  const mod = keybinds.modifierZoom.toLowerCase() + 'Key';
+  if (e[mod]) {
+    // Keyboard-modifier Scroll Zoom
+    e.preventDefault();
+    const scale = Math.exp(-(e.deltaY || e.deltaX) * 0.001 * (zoomSens / 5));
+    setZoom(zoom * scale, e.clientX - media.offsetWidth/2, e.clientY - media.offsetHeight/2);
+  } else if (zoom > 1) {
+    // Fluid 2D Panning when zoomed in
+    e.preventDefault();
+    panX -= e.deltaX;
+    panY -= e.deltaY;
+    scheduleUpdate();
   }
-  customCursor.style.left = e.clientX + 'px';
-  customCursor.style.top = e.clientY + 'px';
-  
-  // Magnetic effect on interactive elements
-  const target = e.target;
-  if (target.closest('button, .thumb, input, select, .welcome-btn, .sidebar-dragbar, .sidebar-toggle')) {
-    customCursor.classList.add('hovering');
-  } else {
-    customCursor.classList.remove('hovering');
-  }
+}, { passive: false });
+
+media.addEventListener('mousedown', async (e) => {
+  if (zoom <= 1 && e.button === 0) { if (e.target.closest('video')) return; e.preventDefault(); getCurrentWindow().startDragging(); return; }
+  if (zoom > 1) { isDragging = true; startX = e.clientX - panX; startY = e.clientY - panY; }
 });
-window.addEventListener('mouseout', () => {
-  customCursor.style.opacity = 0;
-  cursorVisible = false;
+window.addEventListener('mousemove', (e) => { if (isDragging) { panX = e.clientX - startX; panY = e.clientY - startY; scheduleUpdate(); } });
+window.addEventListener('mouseup', () => isDragging = false);
+media.addEventListener('dblclick', (e) => { if (zoom > 1) resetZoom(); else { const r = media.getBoundingClientRect(); setZoom(2.5, e.clientX - r.left - r.width/2, e.clientY - r.top - r.height/2); } });
+
+window.addEventListener('keydown', (e) => {
+    if (['input', 'textarea', 'select'].includes((e.target?.tagName || '').toLowerCase())) return;
+    if (e.key === 'ArrowRight') nav(1); if (e.key === 'ArrowLeft') nav(-1);
+    if (e.key.toLowerCase() === 'e') editToggleBtn.click();
+    if (e.key.toLowerCase() === 'i') { overlayVisible = !overlayVisible; edOverlay.classList.toggle('visible', overlayVisible); if (overlayVisible) drawHistogram(getActiveImage()); }
+    if (e.key.toLowerCase() === 'f') toggleFullscreen();
+    if (e.key.toLowerCase() === 'b') sidebarToggle.click();
 });
 
-// 2. Editorial Metadata Overlay
-let overlayVisible = false;
-const edOverlay = $('editorialOverlay');
-const edCamera = $('edCamera');
-const edAperture = $('edAperture');
-const edShutter = $('edShutter');
-const edIso = $('edIso');
-const edFocal = $('edFocal');
+/* ── Drag & Drop ── */
+window.addEventListener('dragenter', (e) => e.preventDefault());
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => e.preventDefault());
 
-function toggleEditorialOverlay() {
-  if (!items.length || viewer.style.display === 'none') return;
-  overlayVisible = !overlayVisible;
-  if (overlayVisible) {
-    edOverlay.classList.add('visible');
-  } else {
-    edOverlay.classList.remove('visible');
+getCurrentWebview().onDragDropEvent(async (event) => {
+  const { type, paths } = event.payload;
+  if (type === 'enter' || type === 'over') {
+    dropzoneGlow?.classList.add('active');
+  } else if (type === 'leave') {
+    dropzoneGlow?.classList.remove('active');
+  } else if (type === 'drop') {
+    dropzoneGlow?.classList.remove('active');
+    if (!paths?.length) return;
+    try {
+      const p = await invoke('open_specific_folder', { path: paths[0] });
+      await invoke('add_recent_folder', { path: paths[0] });
+      loadFolderData(p);
+    } catch (err) { console.error(err); }
   }
+});
+
+/* ── Histogram & Utilities ── */
+function sortItems() {
+  if (currentSort === 'date') {
+    items.sort((a, b) => (b.modified || 0) - (a.modified || 0));
+  } else if (currentSort === 'size') {
+    items.sort((a, b) => (b.size || 0) - (a.size || 0));
+  } else {
+    items.sort((a, b) => a.path.localeCompare(b.path));
+  }
+  buildFilmstrip();
 }
-
-// 3. Double-Click Smart Zoom
-media.addEventListener('dblclick', (e) => {
-  if (zoom > 1) {
-    resetZoom();
-  } else {
-    const rect = media.getBoundingClientRect();
-    const cx = e.clientX - rect.left - (rect.width / 2);
-    const cy = e.clientY - rect.top - (rect.height / 2);
-    setZoom(2.0, cx, cy, { smooth: false });
-  }
-});
-
-// 4. Fast Canvas-based Color Extraction for Dynamic Tint
-const bgTint = $('bgTint');
-const colorCanvas = document.createElement('canvas');
-const colorCtx = colorCanvas.getContext('2d', { willReadFrequently: true });
-colorCanvas.width = 64;
-colorCanvas.height = 64;
-
+const histogramCanvas = $('histogramCanvas'), histCtx = histogramCanvas?.getContext('2d'), histSample = document.createElement('canvas'), histSampleCtx = histSample.getContext('2d', { willReadFrequently: true });
+histSample.width = 256; histSample.height = 256;
+function clearHistogram() { if (histCtx) histCtx.clearRect(0, 0, histogramCanvas.width, histogramCanvas.height); }
+function drawHistogram(imgEl) {
+  if (!histCtx || !imgEl) return; const W = histogramCanvas.width, H = histogramCanvas.height;
+  try { histSampleCtx.drawImage(imgEl, 0, 0, 256, 256); } catch (e) { return; }
+  const d = histSampleCtx.getImageData(0, 0, 256, 256).data, rB = new Uint32Array(256), gB = new Uint32Array(256), bB = new Uint32Array(256), lB = new Uint32Array(256);
+  for (let i = 0; i < d.length; i += 4) { rB[d[i]]++; gB[d[i+1]]++; bB[d[i+2]]++; lB[Math.round(0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2])]++; }
+  let peak = 1; for (let i = 0; i < 256; i++) peak = Math.max(peak, rB[i], gB[i], bB[i]);
+  histCtx.clearRect(0, 0, W, H);
+  const drawC = (buckets, color) => { histCtx.beginPath(); histCtx.moveTo(0, H); for (let i = 0; i < 256; i++) histCtx.lineTo((i/255)*W, H - (buckets[i]/peak)*H); histCtx.lineTo(W, H); histCtx.fillStyle = color; histCtx.fill(); };
+  drawC(rB, 'rgba(255,75,75,0.4)'); drawC(gB, 'rgba(75,210,100,0.4)'); drawC(bB, 'rgba(75,130,255,0.4)'); drawC(lB, 'rgba(255,255,255,0.65)');
+}
 function extractDominantColor(imgEl) {
   try {
-    colorCtx.drawImage(imgEl, 0, 0, 64, 64);
-    const data = colorCtx.getImageData(0, 0, 64, 64).data;
-    let r = 0, g = 0, b = 0;
-    const pixelCount = 64 * 64;
-    for (let i = 0; i < data.length; i += 4) {
-      r += data[i];
-      g += data[i+1];
-      b += data[i+2];
-    }
-    r = Math.floor(r / pixelCount);
-    g = Math.floor(g / pixelCount);
-    b = Math.floor(b / pixelCount);
-    // Darken slightly for subtlety
-    return `rgba(${r}, ${g}, ${b}, 0.25)`;
-  } catch (e) {
-    return 'transparent';
-  }
+    const c = document.createElement('canvas'); c.width = 64; c.height = 64; const ctx = c.getContext('2d');
+    ctx.drawImage(imgEl, 0, 0, 64, 64);
+    const d = ctx.getImageData(0,0,64,64).data;
+    let r=0,g=0,b=0;
+    for (let i=0; i<d.length; i+=4) { r+=d[i]; g+=d[i+1]; b+=d[i+2]; }
+    const count = d.length / 4;
+    return `rgba(${Math.floor(r/count)}, ${Math.floor(g/count)}, ${Math.floor(b/count)}, 0.3)`;
+  } catch (e) { return 'rgba(255,255,255,0.05)'; }
 }
+
+/* ── Init ── */
+applyTheme(currentTheme);
+renderRecentFolders();
+listen('menu-open-folder', openFolder);
+listen('menu-settings', openSettings);
+if (cinematicCheck) cinematicCheck.checked = cinematicEnabled;
+if (themeSelect) themeSelect.value = currentTheme;
+if (sortSelect) sortSelect.value = currentSort;
+if (zoomSensSlider) zoomSensSlider.value = zoomSens;
+if (customCursorCheck) customCursorCheck.checked = useCustomCursor;
+
+/* ── Settings Tab Switching ── */
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    const pane = $('tab-' + btn.dataset.tab);
+    if (pane) pane.classList.add('active');
+  });
+});
+
+/* ── Settings Controls Wiring ── */
+if (sortSelect) {
+  sortSelect.addEventListener('change', (e) => {
+    currentSort = e.target.value;
+    localStorage.setItem('folio_sort', currentSort);
+    if (items.length) { sortItems(); show(0); }
+  });
+}
+
+if (themeSelect) {
+  themeSelect.addEventListener('change', (e) => {
+    currentTheme = e.target.value;
+    localStorage.setItem('folio_theme', currentTheme);
+    applyTheme(currentTheme);
+  });
+}
+
+if (cinematicCheck) {
+  cinematicCheck.addEventListener('change', (e) => {
+    cinematicEnabled = e.target.checked;
+    localStorage.setItem('folio_cinematic', cinematicEnabled);
+  });
+}
+
+if (customCursorCheck) {
+  customCursorCheck.addEventListener('change', (e) => {
+    useCustomCursor = e.target.checked;
+    localStorage.setItem('folio_custom_cursor', useCustomCursor);
+    updateCursorVisibility();
+  });
+}
+
+if (zoomSensSlider) {
+  zoomSensSlider.addEventListener('input', (e) => {
+    zoomSens = parseFloat(e.target.value);
+    localStorage.setItem('folio_zoom_sens', zoomSens);
+  });
+}
+
+/* ── Keybind Buttons ── */
+function keybindLabel(key) {
+  const labels = { ' ': 'Space', 'ArrowRight': '→', 'ArrowLeft': '←', 'ArrowUp': '↑', 'ArrowDown': '↓', 'Shift': '⇧ Shift', 'Control': '⌃ Ctrl', 'Alt': '⌥ Alt', 'Meta': '⌘ Cmd' };
+  return labels[key] || key.toUpperCase();
+}
+
+function populateKeybindButtons() {
+  document.querySelectorAll('.keybind-btn').forEach(btn => {
+    const action = btn.dataset.action;
+    if (action && keybinds[action] !== undefined) {
+      btn.textContent = keybindLabel(keybinds[action]);
+    }
+  });
+}
+populateKeybindButtons();
+
+$('resetKeybindsBtn')?.addEventListener('click', () => {
+  keybinds = { ...defaultKeybinds };
+  localStorage.setItem('folio_keybinds', JSON.stringify(keybinds));
+  populateKeybindButtons();
+  showToast('Keybinds reset to defaults');
+});
+
+/* ── Keybind Recording ── */
+let activeKeybindBtn = null;
+document.querySelectorAll('.keybind-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (activeKeybindBtn) activeKeybindBtn.classList.remove('recording');
+    activeKeybindBtn = btn;
+    btn.classList.add('recording');
+    btn.textContent = 'Press key...';
+  });
+});
+
+window.addEventListener('keydown', (e) => {
+  if (!activeKeybindBtn) return;
+  e.preventDefault(); e.stopPropagation();
+  const action = activeKeybindBtn.dataset.action;
+  const isModifierAction = action === 'modifierZoom' || action === 'modifierPan';
+  const key = isModifierAction ? e.key : e.key;
+  keybinds[action] = key;
+  localStorage.setItem('folio_keybinds', JSON.stringify(keybinds));
+  activeKeybindBtn.textContent = keybindLabel(key);
+  activeKeybindBtn.classList.remove('recording');
+  activeKeybindBtn = null;
+}, true);

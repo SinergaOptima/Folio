@@ -58,6 +58,7 @@ pub fn build_index(root: &Path, cache: &LibraryCache) -> Result<LibraryIndex> {
 pub struct LibraryCache {
     connection: std::sync::Mutex<Connection>,
     thumb_dir: PathBuf,
+    decoded_dir: PathBuf,
 }
 
 impl LibraryCache {
@@ -68,6 +69,8 @@ impl LibraryCache {
         let db_path = root.join("library.sqlite3");
         let thumb_dir = root.join("thumbs");
         fs::create_dir_all(&thumb_dir)?;
+        let decoded_dir = root.join("decoded");
+        fs::create_dir_all(&decoded_dir)?;
         let connection = Connection::open(db_path)?;
 
         // Enable WAL mode for better concurrent performance
@@ -76,6 +79,7 @@ impl LibraryCache {
         let cache = Self {
             connection: std::sync::Mutex::new(connection),
             thumb_dir,
+            decoded_dir,
         };
         cache.ensure_schema()?;
         Ok(cache)
@@ -230,14 +234,58 @@ impl LibraryCache {
         if thumb_path.exists() {
             return Ok(thumb_path);
         }
-        let decoded = decode_image(path, Some(max_side))
-            .with_context(|| format!("failed to decode thumbnail input {}", path.display()))?;
-        let rgba = image::RgbaImage::from_raw(decoded.width, decoded.height, decoded.rgba)
-            .context("failed to construct RGBA thumbnail image")?;
-        image::DynamicImage::ImageRgba8(rgba)
-            .save(&thumb_path)
-            .with_context(|| format!("failed to save thumbnail {}", thumb_path.display()))?;
+        let tmp_path = thumb_path.with_extension("tmp");
+
+        if media_core::needs_sips_decode(path) {
+            // High-performance native thumbnailing
+            media_core::sips_output_to_file(path, &tmp_path, Some(max_side), "png")
+                .with_context(|| format!("native sips thumbnail failed for {}", path.display()))?;
+        } else {
+            let decoded = decode_image(path, Some(max_side))
+                .with_context(|| format!("failed to decode thumbnail input {}", path.display()))?;
+            let rgba = image::RgbaImage::from_raw(decoded.width, decoded.height, decoded.rgba)
+                .context("failed to construct RGBA thumbnail image")?;
+            image::DynamicImage::ImageRgba8(rgba)
+                .save(&tmp_path)
+                .with_context(|| format!("failed to save thumbnail {}", tmp_path.display()))?;
+        }
+
+        std::fs::rename(&tmp_path, &thumb_path)
+            .with_context(|| format!("failed to finalize thumbnail {}", thumb_path.display()))?;
         Ok(thumb_path)
+    }
+
+    /// Decode a non-native-format image (RAW, exotic TIFF, HEIC, etc.) via sips,
+    /// cache the result as a high-quality JPEG, and return the cached path.
+    /// On subsequent calls the cached file is returned immediately.
+    pub fn ensure_decoded(&self, path: &Path) -> Result<PathBuf> {
+        let fingerprint = image_fingerprint(path)?;
+        let cached = self.decoded_dir.join(format!("{fingerprint}.jpg"));
+        if cached.exists() {
+            return Ok(cached);
+        }
+        let tmp_path = cached.with_extension("tmp");
+
+        if media_core::needs_sips_decode(path) {
+            // High-performance native decode directly to the cached file
+            media_core::sips_output_to_file(path, &tmp_path, None, "jpeg")
+                .with_context(|| format!("native sips decode failed for {}", path.display()))?;
+        } else {
+            let img = media_core::open_image(path)?;
+            let img = media_core::apply_exif_orientation(&img, path);
+            // Encode as high-quality JPEG (q95) — much smaller than 16-bit PNG, lossless enough
+            let rgb8 = img.to_rgb8();
+            let mut file = std::fs::File::create(&tmp_path)
+                .with_context(|| format!("failed to create decoded cache file: {}", tmp_path.display()))?;
+            let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut file, 95);
+            image::DynamicImage::ImageRgb8(rgb8)
+                .write_with_encoder(encoder)
+                .with_context(|| format!("failed to encode decoded image: {}", path.display()))?;
+        }
+
+        std::fs::rename(&tmp_path, &cached)
+            .with_context(|| format!("failed to finalize decoded image: {}", cached.display()))?;
+        Ok(cached)
     }
 
     pub fn warm_thumbnails(&self, paths: &[PathBuf], max_side: u32) {
@@ -260,7 +308,7 @@ fn modified_secs(path: &Path) -> Result<i64> {
 
 fn image_fingerprint(path: &Path) -> Result<String> {
     let stamp = modified_secs(path)?;
-    let key = format!("{}::{stamp}", path.to_string_lossy());
+    let key = format!("{}::{stamp}_v3", path.to_string_lossy());
     Ok(blake3::hash(key.as_bytes()).to_hex().to_string())
 }
 

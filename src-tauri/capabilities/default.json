@@ -11,6 +11,6 @@
     "core:window:allow-set-fullscreen",
     "core:window:allow-set-simple-fullscreen",
     "dialog:default",
-    "updater:default"
+    "core:window:allow-set-cursor-visible"
   ]
 }

@@ -12,6 +12,7 @@ Folio is a high-performance, macOS-native media viewer. It uses Tauri for its ar
 - **Customizable Keybindings**: Fully customizable shortcuts and mouse modifiers via the Settings menu.
 - **Native macOS Feel**: Cinematic hardware-accelerated mesh gradient backgrounds, dynamic color tinting based on the active image, and custom magnetic cursors.
 - **Precise Zoom**: Buttery smooth, customizable `Shift+Scroll` variable zoom that perfectly tracks the cursor with drag panning.
+- **Simple Photo Editing**: Non-destructive adjustments for Brightness and Vibrance, plus instant Horizontal/Vertical flipping.
 
 ## Roadmap (Near Term)
 We are actively building out Folio's UI/UX to make it the most premium media viewer on macOS. Coming soon:
@@ -27,14 +28,13 @@ We are actively building out Folio's UI/UX to make it the most premium media vie
 - **Settings Tabs:** A categorized, tabbed settings modal for easier navigation.
 - **System & Accessibility:** Toggle for the custom magnetic cursor, toast notifications for actions, traffic-light hover handling, and elegant empty states.
 
-## Roadmap (1-2 Months Out)
+## Roadmap (Next Few Days)
 Beyond immediate UX polish, Folio will expand into a minimal but powerful workflow tool:
-- **Photo Color Grading:** Basic non-destructive color adjustments (Exposure, Contrast, Highlights/Shadows).
 - **Minimal Photograph Editing:** Crop, rotate, and straighten tools built directly into the viewer.
 - **EXIF Editing:** Ability to modify or strip metadata before exporting.
 - **Smart Tags & Albums:** Local tagging system to curate mini-collections without moving files on disk.
 
-> **Note:** We are currently investigating an issue with the auto-updater failing to check GitHub releases. Manual updates via downloading the newest `.dmg` may be required in the short term.
+> **Note:** The auto-updater is currently on hold due to signature and certificate issues. Please download manual updates from the GitHub Releases page.
 
 ### "App is damaged and can't be opened" (macOS)
 Because Folio is a free, open-source app, it is not cryptographically "notarized" using a paid Apple Developer account ($99/year). Because of this, modern macOS Gatekeeper intentionally marks the downloaded app as "damaged" to force developers into their paid ecosystem, completely hiding the "Open Anyway" button.
@@ -47,5 +47,3 @@ Because Folio is a free, open-source app, it is not cryptographically "notarized
 xattr -cr /Applications/Folio.app
 ```
 This simply strips Apple's "quarantine" flag from the file. You will now be able to open Folio normally forever!
-
-

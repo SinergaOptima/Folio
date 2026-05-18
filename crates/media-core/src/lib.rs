@@ -1,3 +1,6 @@
+pub mod edit;
+pub use edit::{SimpleEdit, apply_edit};
+
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
@@ -42,7 +45,18 @@ pub enum MediaError {
 
 pub fn supported_image_extensions() -> &'static [&'static str] {
     &[
-        "jpg", "jpeg", "png", "webp", "avif", "tif", "tiff", "bmp", "gif",
+        // Browser-native (image crate handles these fine)
+        "jpg", "jpeg", "png", "webp", "avif", "gif", "bmp",
+        // TIFF — image crate handles basic TIFFs; exotic photometrics fall back to sips
+        "tif", "tiff",
+        // RAW formats — all handled via sips on macOS
+        "raf", "nef", "nrw", "arw", "srf", "sr2", "cr2", "cr3", "crw",
+        "orf", "rw2", "pef", "dng", "raw", "rwl", "mrw", "erf", "mos",
+        "iiq", "3fr", "fff", "srw", "axr", "dcr", "dxo", "nefx",
+        // Other formats sips can read
+        "heic", "heif", "heics", "avci",
+        "exr", "psd", "jxl", "jp2",
+        "svg", "pic", "sgi", "tga", "mpo",
     ]
 }
 
@@ -93,11 +107,171 @@ pub fn scan_supported_images(root: &Path) -> Result<Vec<PathBuf>> {
     scan_supported_media(root)
 }
 
-/// Fast metadata read — uses image header dimensions only, avoids full decode
+/// Formats the `image` crate can decode natively without sips.
+fn image_crate_native(ext: &str) -> bool {
+    matches!(ext, "jpg" | "jpeg" | "png" | "webp" | "avif" | "gif" | "bmp")
+}
+
+pub fn needs_sips_decode(path: &Path) -> bool {
+    let ext = path.extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+
+    // On macOS, we use sips for everything that's not natively handled by the image crate,
+    // plus TIFF because the image crate's TIFF decoder is buggy with IFDs and 16-bit.
+    !image_crate_native(&ext) || ext == "tif" || ext == "tiff"
+}
+
+/// Resize any image via macOS `sips` directly to a file. 
+/// Used for high-performance thumbnailing and full-size decoding.
+#[cfg(target_os = "macos")]
+pub fn sips_output_to_file(path: &Path, dest: &Path, max_side: Option<u32>, format: &str) -> Result<()> {
+    use std::process::Command;
+    let mut cmd = Command::new("sips");
+    cmd.arg("-s").arg("format").arg(format);
+    
+    if format == "jpeg" {
+        cmd.arg("-s").arg("formatOptions").arg("95");
+    }
+
+    if let Some(max_side) = max_side {
+        cmd.arg("-Z").arg(max_side.to_string());
+    }
+
+    cmd.arg(path)
+       .arg("--out")
+       .arg(dest);
+
+    let output = cmd.output().with_context(|| format!("sips failed for {}", path.display()))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("sips error for {}: {}", path.display(), stderr);
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn sips_output_to_file(_path: &Path, _dest: &Path, _max_side: Option<u32>, _format: &str) -> Result<()> {
+    anyhow::bail!("sips is only available on macOS")
+}
+
+/// Decode any image via macOS `sips` → temp JPEG → `image` crate.
+/// Used for RAW files, exotic TIFFs, HEIC, EXR, PSD, JXL, etc.
+#[cfg(target_os = "macos")]
+pub fn sips_decode(path: &Path) -> Result<DynamicImage> {
+    use std::process::Command;
+
+    // Include mtime in cache key so edits to the source file invalidate the cache
+    let mtime = std::fs::metadata(path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let cache_key = format!("{}::{}", path.to_string_lossy(), mtime);
+    let tmp = std::env::temp_dir().join(format!(
+        "folio_sips_{}.jpg",
+        blake3::hash(cache_key.as_bytes()).to_hex()
+    ));
+
+    if !tmp.exists() {
+        let output = Command::new("sips")
+            .args(["-s", "format", "jpeg"])
+            .args(["-s", "formatOptions", "100"])
+            .arg(path)
+            .args(["--out", tmp.to_str().context("non-UTF8 temp path")?])
+            .output()
+            .with_context(|| format!("sips failed for {}", path.display()))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("sips error for {}: {}", path.display(), stderr);
+        }
+    }
+
+    image::open(&tmp).with_context(|| format!("failed to open sips output for {}", path.display()))
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn sips_decode(path: &Path) -> Result<DynamicImage> {
+    anyhow::bail!("sips is only available on macOS: {}", path.display())
+}
+
+/// Get dimensions via macOS `sips` without decoding the whole image.
+#[cfg(target_os = "macos")]
+pub fn sips_get_dimensions(path: &Path) -> Result<(u32, u32)> {
+    use std::process::Command;
+    let output = Command::new("sips")
+        .args(["-g", "pixelWidth", "-g", "pixelHeight"])
+        .arg(path)
+        .output()
+        .with_context(|| format!("sips -g failed for {}", path.display()))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("sips -g error for {}: {}", path.display(), stderr);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut w = None;
+    let mut h = None;
+
+    for line in stdout.lines() {
+        if line.contains("pixelWidth:") {
+            w = line.split(':').last().and_then(|s| s.trim().parse().ok());
+        } else if line.contains("pixelHeight:") {
+            h = line.split(':').last().and_then(|s| s.trim().parse().ok());
+        }
+    }
+
+    match (w, h) {
+        (Some(w), Some(h)) => Ok((w, h)),
+        _ => anyhow::bail!("failed to parse sips output for {}: {}", path.display(), stdout),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn sips_get_dimensions(_path: &Path) -> Result<(u32, u32)> {
+    anyhow::bail!("sips is only available on macOS")
+}
+
+/// Open an image, falling back to sips for formats the image crate can't handle.
+pub fn open_image(path: &Path) -> Result<DynamicImage> {
+    let ext = path.extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+
+    if image_crate_native(&ext) {
+        return image::open(path)
+            .with_context(|| format!("failed to decode image: {}", path.display()));
+    }
+
+    // On macOS, always use sips for TIFF and everything else non-native.
+    // The image crate's TIFF decoder often reads thumbnail IFDs or fails on 16-bit/exotic photometrics.
+    #[cfg(target_os = "macos")]
+    {
+        return sips_decode(path);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        // For TIFF, try image crate first (handles most TIFFs), fall back to sips (which will error on non-macOS)
+        if ext == "tif" || ext == "tiff" {
+            match image::open(path) {
+                Ok(img) => return Ok(img),
+                Err(_) => return sips_decode(path),
+            }
+        }
+        sips_decode(path)
+    }
+}
+
 pub fn read_metadata_fast(path: &Path) -> Result<ImageMetadata> {
     if is_video_path(path) {
-        // For video files we can't easily get dimensions without ffprobe,
-        // so return a placeholder
         return Ok(ImageMetadata {
             width: 1920,
             height: 1080,
@@ -111,32 +285,48 @@ pub fn read_metadata_fast(path: &Path) -> Result<ImageMetadata> {
         return Err(MediaError::Unsupported(path.to_path_buf()).into());
     }
 
-    let reader = ImageReader::open(path)
-        .with_context(|| format!("failed to open image: {}", path.display()))?
-        .with_guessed_format()
-        .with_context(|| format!("failed to guess format: {}", path.display()))?;
-    let format = reader.format();
+    let ext = path.extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
 
-    // Try to read just dimensions from the header without full decode
-    let (width, height) = match reader.into_dimensions() {
-        Ok(dims) => dims,
-        Err(_) => {
-            // Fallback: full decode
-            let img = image::open(path)
-                .with_context(|| format!("failed to decode image: {}", path.display()))?;
-            img.dimensions()
+    // For image-crate-native formats, try fast header-only dimension read
+    let (width, height, format) = if image_crate_native(&ext) {
+        let reader = ImageReader::open(path)
+            .with_context(|| format!("failed to open image: {}", path.display()))?
+            .with_guessed_format()
+            .with_context(|| format!("failed to guess format: {}", path.display()))?;
+        let fmt = reader.format();
+        let (w, h) = reader.into_dimensions()
+            .with_context(|| format!("failed to read dimensions: {}", path.display()))?;
+        (w, h, fmt)
+    } else {
+        // For everything else (TIFF, RAW, etc.) use sips on macOS for speed and reliability.
+        #[cfg(target_os = "macos")]
+        {
+            let (w, h) = sips_get_dimensions(path)?;
+            (w, h, None)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            // Fallback for non-macOS if we ever support it (currently we don't for RAW)
+            if ext == "tif" || ext == "tiff" {
+                let reader = ImageReader::open(path)
+                    .ok()
+                    .and_then(|r| r.with_guessed_format().ok());
+                let fmt = reader.as_ref().and_then(|r| r.format());
+                match reader.and_then(|r| r.into_dimensions().ok()) {
+                    Some((w, h)) => (w, h, fmt),
+                    None => anyhow::bail!("TIFF dimensions failed and sips unavailable"),
+                }
+            } else {
+                anyhow::bail!("RAW formats require sips (macOS only)")
+            }
         }
     };
 
     let (orientation, exif_data) = read_full_exif(path).unwrap_or((1, None));
-
-    Ok(ImageMetadata {
-        width,
-        height,
-        orientation,
-        format,
-        exif: exif_data,
-    })
+    Ok(ImageMetadata { width, height, orientation, format, exif: exif_data })
 }
 
 pub fn read_metadata(path: &Path) -> Result<ImageMetadata> {
@@ -144,22 +334,17 @@ pub fn read_metadata(path: &Path) -> Result<ImageMetadata> {
 }
 
 pub fn decode_image(path: &Path, max_side: Option<u32>) -> Result<DecodedImage> {
-    let mut image =
-        image::open(path).with_context(|| format!("failed to decode image: {}", path.display()))?;
+    let mut img = open_image(path)?;
     let orientation = read_exif_orientation(path).unwrap_or(1);
-    image = apply_orientation(image, orientation);
+    img = apply_orientation(img, orientation);
 
     if let Some(max_side) = max_side {
-        image = downscale_if_needed(image, max_side);
+        img = downscale_if_needed(img, max_side);
     }
 
-    let rgba8 = image.to_rgba8();
-    let (width, height) = image.dimensions();
-    Ok(DecodedImage {
-        width,
-        height,
-        rgba: rgba8.into_vec(),
-    })
+    let rgba8 = img.to_rgba8();
+    let (width, height) = img.dimensions();
+    Ok(DecodedImage { width, height, rgba: rgba8.into_vec() })
 }
 
 fn downscale_if_needed(image: DynamicImage, max_side: u32) -> DynamicImage {
@@ -172,7 +357,7 @@ fn downscale_if_needed(image: DynamicImage, max_side: u32) -> DynamicImage {
     let scale = max_side as f32 / current_max as f32;
     let target_w = (width as f32 * scale).round().max(1.0) as u32;
     let target_h = (height as f32 * scale).round().max(1.0) as u32;
-    image.resize(target_w, target_h, image::imageops::FilterType::Triangle)
+    image.resize(target_w, target_h, image::imageops::FilterType::Lanczos3)
 }
 
 fn read_exif_orientation(path: &Path) -> Result<u16> {
@@ -229,6 +414,12 @@ fn read_full_exif(path: &Path) -> Result<(u16, Option<ExifData>)> {
     };
 
     Ok((orientation, exif_data))
+}
+
+/// Decode and apply EXIF orientation to an already-opened DynamicImage.
+pub fn apply_exif_orientation(image: &DynamicImage, path: &Path) -> DynamicImage {
+    let orientation = read_exif_orientation(path).unwrap_or(1);
+    apply_orientation(image.clone(), orientation)
 }
 
 fn apply_orientation(image: DynamicImage, orientation: u16) -> DynamicImage {
