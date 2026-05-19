@@ -14,37 +14,15 @@ Folio is a high-performance, macOS-native media viewer. It uses Tauri for its ar
 - **Precise Zoom**: Buttery smooth, customizable `Shift+Scroll` variable zoom that perfectly tracks the cursor with drag panning.
 - **Simple Photo Editing**: Non-destructive adjustments for Brightness and Vibrance, plus instant Horizontal/Vertical flipping.
 
-## Roadmap (Upcoming High-Fidelity Phases)
-
-We are actively developing Folio into the most premium, high-performance media viewer and workflow tool for macOS. Our curated upcoming development phases include:
-
-### 🎨 Visual & Aesthetic Elegance (macOS Native)
-- **Dynamic App Vibrancy**: Reactively shift window backdrop transparency and tinting based on the active image's dominant HSL triad.
-- **Bilinear/Lanczos GPU downscaling**: GPU-accelerated scaling shaders that maintain ultra-crisp, sharp image rendering for high-megapixel assets when zoomed out.
-- **Cinematic Crossfades**: Seamless, smooth crossfading animations during automatic slideshow navigation.
-- **Haptic Trackpad Zoom Snapping**: Trigger native macOS haptic trackpad ticks when zooming boundaries cross 100%, 200%, or fit-to-screen thresholds.
-- **Full-Screen Zoomable Media Grid**: A dedicated full-screen catalog viewport utilizing `Cmd` + `+`/`-` key combinations to dynamically zoom grid layouts, with right-click options to directly create, rename, and manage physical directories on disk.
-
-### ⚡ Blazing Performance (Apple Silicon Optimization)
-- **Apple Silicon Neon Resizer**: Native Rust SIMD/NEON-assisted image scaling to speed up heavy RAW and TIFF loading times by 400%.
-- **Filesystem Hot-Watcher**: Real-time folder syncing that instantly updates Folio when files are added, removed, or edited in Finder.
-- **Zero-Lag Predictive Caching**: Multi-threaded preloader that decodes the next three adjacent images in the background.
-- **LruMemory Auto-Shrinker**: Smart buffer manager that automatically purges memory caches under system pressure events.
-- **Featherweight App Footprint**: Dynamic code-stripping and compact dependency audits to keep the Tauri binary size exceptionally small.
-
-### 📸 Professional Photography Workflow
-- **Frosted MapKit GPS Popup**: Tapping location coordinates inside the EXIF overlay (`I`) launches a beautiful inline Apple Maps snippet.
-- **Double-Pane Before/After Compare**: A sliding comparative viewport to inspect original vs. edited versions side-by-side.
-- **Dynamic SERIF Watermarking**: Custom typographic serine-style signature overrides applied dynamically on image export.
-- **Intelligent Visual Similarity Finder**: Local perceptual visual hashing (dHash) to flag duplicates or blurry frames inside a directory.
-- **Accessibility Color Simulator**: Real-time filters (Protanopia, Deuteranopia, Tritanopia) for designers auditing assets.
-- **Format Transcode HUD**: Quick-action batch converter pill at the bottom of the grid view (supporting lossless conversions to and from WebP, PNG, JPEG, AVIF, TIFF, etc.).
-
-### 🔒 Privacy, Tagging, & System Integrations
-- **AES-256 Secure Vault**: Encrypted private folder galleries locked securely behind TouchID/FaceID.
-- **Gestural Flick-to-Trash**: Swipe or flick thumbnails upwards with physics-based spring acceleration to quickly trash files.
-- **Apple Live Photos Playback**: Support playing Live Photo HEIC + MOV combinations by holding click on the media viewport.
-- **Advanced Trackpad Gestures**: Buttery smooth multi-touch gestures for navigation swipe-paging, viewport scaling, and direct panning.
+- **Full-Screen Media Catalog**: A zoomable grid view with thumbnail shimmer loading, multi-select (⇧/⌘+Click), batch format transcoding (WebP, PNG, JPEG, AVIF, TIFF), duplicate detection via perceptual hashing, and inline folder creation.
+- **Tag Filtering**: Sidebar tag filter panel with color-coded chips to isolate images by custom tags.
+- **GPS Map Popup**: Tap EXIF GPS coordinates to launch an inline map view of the image's capture location.
+- **Format Transcoding**: Batch convert selected images between WebP, PNG, JPEG, AVIF, and TIFF directly from the catalog grid.
+- **Duplicate Finder**: Perceptual hash-based visual similarity detection to flag duplicate or near-duplicate images.
+- **Accessibility Color Simulator**: Real-time Protanopia, Deuteranopia, and Tritanopia filters for designers auditing assets.
+- **Export Watermarking**: Optional text watermark overlay applied dynamically on image export.
+- **Custom SVG Icon System**: Every icon in the app uses crisp, consistent inline SVGs — no emoji fallbacks.
+- **Window Vibrancy**: Optional macOS-native window transparency and background tinting.
 
 > **Note:** The auto-updater is currently on hold due to signature and certificate issues. Please download manual updates from the GitHub Releases page.
 

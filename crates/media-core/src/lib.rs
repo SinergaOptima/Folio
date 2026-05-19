@@ -19,6 +19,8 @@ pub struct ExifData {
     pub shutter_speed: Option<String>,
     pub iso: Option<String>,
     pub focal_length: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -422,7 +424,34 @@ fn read_full_exif(path: &Path) -> Result<(u16, Option<ExifData>)> {
         .get_field(Tag::FocalLength, In::PRIMARY)
         .map(|f| f.display_value().with_unit(&exif).to_string());
 
-    let has_exif = camera.is_some() || aperture.is_some() || shutter_speed.is_some() || iso.is_some() || focal_length.is_some();
+    let parse_gps_coord = |tag: Tag, ref_tag: Tag| -> Option<f64> {
+        let field = exif.get_field(tag, In::PRIMARY)?;
+        let ref_field = exif.get_field(ref_tag, In::PRIMARY)?;
+        let ref_val = ref_field.display_value().to_string();
+        
+        if let exif::Value::Rational(rationals) = &field.value {
+            if rationals.len() >= 3 {
+                let d = rationals[0].num as f64 / rationals[0].denom.max(1) as f64;
+                let m = rationals[1].num as f64 / rationals[1].denom.max(1) as f64;
+                let s = rationals[2].num as f64 / rationals[2].denom.max(1) as f64;
+                let mut val = d + (m / 60.0) + (s / 3600.0);
+                let ref_upper = ref_val.to_uppercase();
+                if ref_upper.contains("S") || ref_upper.contains("W") {
+                    val = -val;
+                }
+                Some(val)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    };
+
+    let latitude = parse_gps_coord(Tag::GPSLatitude, Tag::GPSLatitudeRef);
+    let longitude = parse_gps_coord(Tag::GPSLongitude, Tag::GPSLongitudeRef);
+
+    let has_exif = camera.is_some() || aperture.is_some() || shutter_speed.is_some() || iso.is_some() || focal_length.is_some() || latitude.is_some() || longitude.is_some();
     
     let exif_data = if has_exif {
         Some(ExifData {
@@ -431,6 +460,8 @@ fn read_full_exif(path: &Path) -> Result<(u16, Option<ExifData>)> {
             shutter_speed,
             iso,
             focal_length,
+            latitude,
+            longitude,
         })
     } else {
         None

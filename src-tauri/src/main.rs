@@ -4,8 +4,9 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tauri::State;
+use tauri::{State, Emitter};
 use parking_lot::RwLock;
+use notify::{Watcher, RecommendedWatcher, RecursiveMode, EventKind};
 
 use library_core::{LibraryCache, LibraryIndex, build_index, rusqlite};
 use media_core::{SimpleEdit, apply_edit, is_video_path};
@@ -18,6 +19,8 @@ struct UiExif {
     shutter_speed: Option<String>,
     iso: Option<String>,
     focal_length: Option<String>,
+    latitude: Option<f64>,
+    longitude: Option<f64>,
 }
 
 #[derive(serde::Serialize)]
@@ -44,6 +47,7 @@ struct AppState {
     recent_folders: RwLock<Vec<String>>,
     /// In-memory cache of already resolved thumbnail paths: key is (path_string, max_side), value is thumb_path_string
     resolved_thumbs: RwLock<HashMap<(String, u32), String>>,
+    watcher: RwLock<Option<notify::RecommendedWatcher>>,
 }
 
 #[tauri::command]
@@ -110,7 +114,7 @@ async fn add_recent_folder(path: String, state: State<'_, Arc<AppState>>) -> Res
 }
 
 #[tauri::command]
-async fn trigger_macos_sound(name: String) -> Result<(), String> {
+async fn trigger_macos_sound(name: String, volume: Option<f64>) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let sound_path = match name.as_str() {
@@ -119,13 +123,52 @@ async fn trigger_macos_sound(name: String) -> Result<(), String> {
             "load" => "/System/Library/Sounds/Purr.aiff",
             _ => "/System/Library/Sounds/Pop.aiff",
         };
-        let _ = std::process::Command::new("afplay").arg("-v").arg("0.4").arg(sound_path).spawn();
+        let vol_val = volume.unwrap_or(0.4);
+        let vol_str = format!("{:.2}", vol_val);
+        let _ = std::process::Command::new("afplay").arg("-v").arg(vol_str).arg(sound_path).spawn();
     }
     Ok(())
 }
 
+fn setup_watcher(folder_path: &Path, state: &Arc<AppState>, app_handle: tauri::AppHandle) -> Result<(), String> {
+    let state_clone = Arc::clone(state);
+    let path_buf = folder_path.to_path_buf();
+    
+    let mut watcher_lock = state.watcher.write();
+    if let Some(mut old_watcher) = watcher_lock.take() {
+        let _ = old_watcher.unwatch(&path_buf);
+    }
+    
+    let app_handle_clone = app_handle.clone();
+    let mut watcher = RecommendedWatcher::new(move |res: Result<notify::Event, notify::Error>| {
+        if let Ok(event) = res {
+            match event.kind {
+                EventKind::Create(_) | EventKind::Remove(_) | EventKind::Modify(_) => {
+                    let state_arc = state_clone.clone();
+                    let folder_p = path_buf.clone();
+                    let app_h = app_handle_clone.clone();
+                    
+                    tauri::async_runtime::spawn(async move {
+                        let _ = build_index(&folder_p, &state_arc.cache);
+                        let _ = app_h.emit("fs-change", ());
+                    });
+                }
+                _ => {}
+            }
+        }
+    }, notify::Config::default()).map_err(|e| e.to_string())?;
+    
+    watcher.watch(folder_path, RecursiveMode::NonRecursive).map_err(|e| e.to_string())?;
+    *watcher_lock = Some(watcher);
+    
+    Ok(())
+}
+
 #[tauri::command]
-async fn open_folder_picker(state: State<'_, Arc<AppState>>) -> Result<Option<String>, String> {
+async fn open_folder_picker(
+    state: State<'_, Arc<AppState>>,
+    app_handle: tauri::AppHandle,
+) -> Result<Option<String>, String> {
     let folder = rfd::AsyncFileDialog::new().pick_folder().await;
     let Some(folder) = folder else { return Ok(None); };
     let folder_path = folder.path().to_path_buf();
@@ -146,20 +189,28 @@ async fn open_folder_picker(state: State<'_, Arc<AppState>>) -> Result<Option<St
     })
     .await
     .map_err(|e| e.to_string())??;
+    
+    let _ = setup_watcher(&PathBuf::from(&path_str), &state.inner().clone(), app_handle);
     Ok(Some(path_str))
 }
 
 #[tauri::command]
-async fn open_specific_folder(path: String, state: State<'_, Arc<AppState>>) -> Result<String, String> {
+async fn open_specific_folder(
+    path: String,
+    state: State<'_, Arc<AppState>>,
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
     let folder_path = PathBuf::from(&path);
     let state_arc = state.inner().clone();
+    let folder_path_clone = folder_path.clone();
+    let state_arc_clone = state_arc.clone();
     let path_str = tauri::async_runtime::spawn_blocking(move || {
-        let index = build_index(&folder_path, &state_arc.cache).map_err(|e| e.to_string())?;
-        let path_str = folder_path.to_string_lossy().to_string();
-        *state_arc.index.write() = Some(index.clone());
+        let index = build_index(&folder_path_clone, &state_arc_clone.cache).map_err(|e| e.to_string())?;
+        let path_str = folder_path_clone.to_string_lossy().to_string();
+        *state_arc_clone.index.write() = Some(index.clone());
 
         // Spawn background thread to pre-warm thumbnails in parallel
-        let state_clone = state_arc.clone();
+        let state_clone = state_arc_clone.clone();
         let paths: Vec<PathBuf> = index.items.iter().map(|item| item.path.clone()).collect();
         std::thread::spawn(move || {
             state_clone.cache.warm_thumbnails(&paths, 0, 320);
@@ -169,6 +220,8 @@ async fn open_specific_folder(path: String, state: State<'_, Arc<AppState>>) -> 
     })
     .await
     .map_err(|e| e.to_string())??;
+    
+    let _ = setup_watcher(&folder_path, &state_arc, app_handle);
     Ok(path_str)
 }
 
@@ -192,6 +245,8 @@ async fn get_folder_items(state: State<'_, Arc<AppState>>) -> Result<Vec<UiItem>
                     shutter_speed: e.shutter_speed.clone(),
                     iso: e.iso.clone(),
                     focal_length: e.focal_length.clone(),
+                    latitude: e.latitude,
+                    longitude: e.longitude,
                 });
                 UiItem {
                     path: item.path.to_string_lossy().to_string(),
@@ -302,7 +357,11 @@ async fn prepare_edit_preview(path: String, state: State<'_, Arc<AppState>>) -> 
             img
         };
 
-        state_arc.preview_cache.write().insert(path, img);
+        let mut preview_cache = state_arc.preview_cache.write();
+        if preview_cache.len() >= 30 {
+            preview_cache.clear();
+        }
+        preview_cache.insert(path, img);
         Ok::<(), String>(())
     })
     .await
@@ -389,14 +448,23 @@ fn copy_jpeg_exif(src_path: &Path, dest_path: &Path) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn export_edited(path: String, dest: String, strip_metadata: bool, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+async fn export_edited(path: String, dest: String, strip_metadata: bool, watermark: Option<Vec<u8>>, state: State<'_, Arc<AppState>>) -> Result<(), String> {
     let state_arc = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let edit = state_arc.edits.read().get(&path).cloned().unwrap_or_default();
         let p = PathBuf::from(&path);
         let mut img = media_core::open_image(&p).map_err(|e| e.to_string())?;
         img = media_core::apply_exif_orientation(&img, &p);
-        let edited = apply_edit(&img, &edit);
+        let mut edited = apply_edit(&img, &edit);
+        
+        if let Some(wm_bytes) = watermark {
+            if let Ok(wm_img) = image::load_from_memory(&wm_bytes) {
+                let x = edited.width().saturating_sub(wm_img.width() + 40);
+                let y = edited.height().saturating_sub(wm_img.height() + 40);
+                image::imageops::overlay(&mut edited, &wm_img, x as i64, y as i64);
+            }
+        }
+        
         let dest_path = PathBuf::from(&dest);
         let fmt = image::ImageFormat::from_path(&dest_path).unwrap_or(image::ImageFormat::Jpeg);
         edited.save_with_format(&dest_path, fmt).map_err(|e| e.to_string())?;
@@ -622,6 +690,50 @@ async fn get_all_albums(state: State<'_, Arc<AppState>>) -> Result<Vec<AlbumInfo
 }
 
 #[tauri::command]
+async fn get_folder_tags_summary(state: State<'_, Arc<AppState>>) -> Result<Vec<(String, String, String)>, String> {
+    let state_arc = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = state_arc.cache.connection.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT it.image_path, it.tag_name, COALESCE(t.color, '#D4A72C') FROM image_tags it LEFT JOIN tags t ON it.tag_name = t.name"
+        ).map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        }).map_err(|e| e.to_string())?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row.map_err(|e| e.to_string())?);
+        }
+        Ok(results)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn create_physical_folder(parent_path: String, folder_name: String) -> Result<(), String> {
+    let p = std::path::PathBuf::from(&parent_path).join(&folder_name);
+    std::fs::create_dir_all(&p).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn delete_physical_file(path: String, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    let p = std::path::PathBuf::from(&path);
+    if p.exists() {
+        std::fs::remove_file(&p).map_err(|e| e.to_string())?;
+    }
+    
+    let state_arc = state.inner().clone();
+    let mut index_lock = state_arc.index.write();
+    if let Some(index) = &mut *index_lock {
+        index.items.retain(|item| item.path != p);
+    }
+    
+    Ok(())
+}
+
+#[tauri::command]
 async fn get_dominant_colors(path: String) -> Result<Vec<String>, String> {
     let p = std::path::PathBuf::from(&path);
     if media_core::is_video_path(&p) {
@@ -681,6 +793,133 @@ fn parse_range(header: &str, file_len: u64) -> Option<(u64, u64)> {
     if start <= end && start < file_len { Some((start, end.min(file_len - 1))) } else { None }
 }
 
+#[tauri::command]
+async fn find_visual_duplicates(paths: Vec<String>) -> Result<Vec<Vec<String>>, String> {
+    if paths.is_empty() { return Ok(Vec::new()); }
+    
+    let result: Result<Vec<(String, u64)>, String> = tauri::async_runtime::spawn_blocking(move || {
+        let mut local_hashes = Vec::new();
+        for path_str in paths {
+            let path = std::path::Path::new(&path_str);
+            if !path.exists() { continue; }
+            if let Ok(img) = image::open(path) {
+                let gray = img.resize_exact(9, 8, image::imageops::FilterType::Nearest).to_luma8();
+                let mut dhash: u64 = 0;
+                let mut bit_idx = 0;
+                for y in 0..8 {
+                    for x in 0..8 {
+                        let p1 = gray.get_pixel(x, y)[0];
+                        let p2 = gray.get_pixel(x + 1, y)[0];
+                        if p2 > p1 {
+                            dhash |= 1 << bit_idx;
+                        }
+                        bit_idx += 1;
+                    }
+                }
+                local_hashes.push((path_str, dhash));
+            }
+        }
+        Ok(local_hashes)
+    }).await.unwrap_or(Err("Task failed".to_string()));
+    
+    let hashes = result?;
+    let mut grouped = Vec::new();
+    let mut processed = std::collections::HashSet::new();
+    
+    for i in 0..hashes.len() {
+        if processed.contains(&i) { continue; }
+        
+        let mut current_group = vec![hashes[i].0.clone()];
+        processed.insert(i);
+        
+        for j in (i + 1)..hashes.len() {
+            if processed.contains(&j) { continue; }
+            let diff = (hashes[i].1 ^ hashes[j].1).count_ones();
+            if diff <= 10 {
+                current_group.push(hashes[j].0.clone());
+                processed.insert(j);
+            }
+        }
+        if current_group.len() > 1 {
+            grouped.push(current_group);
+        }
+    }
+    
+    Ok(grouped)
+}
+
+#[tauri::command]
+async fn batch_transcode(paths: Vec<String>, target_format: String) -> Result<String, String> {
+    let target = target_format.to_lowercase();
+    let fmt = match target.as_str() {
+        "jpeg" | "jpg" => image::ImageFormat::Jpeg,
+        "png" => image::ImageFormat::Png,
+        "webp" => image::ImageFormat::WebP,
+        "tiff" | "tif" => image::ImageFormat::Tiff,
+        "avif" => image::ImageFormat::Avif,
+        _ => return Err(format!("Unsupported format: {}", target_format)),
+    };
+    
+    if paths.is_empty() {
+        return Ok("No files selected".to_string());
+    }
+    
+    let count = paths.len();
+    
+    let res = tauri::async_runtime::spawn_blocking(move || {
+        let mut success = 0;
+        let mut fails = 0;
+        let mut last_err = String::new();
+        for path_str in paths {
+            let path = std::path::Path::new(&path_str);
+            if !path.exists() { fails += 1; continue; }
+            
+            match image::open(path) {
+                Ok(img) => {
+                    let parent = path.parent().unwrap_or(path);
+                    let dir = parent.join("Transcoded");
+                    let _ = std::fs::create_dir_all(&dir);
+                    
+                    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+                    let ext = match fmt {
+                        image::ImageFormat::Jpeg => "jpg",
+                        image::ImageFormat::Png => "png",
+                        image::ImageFormat::WebP => "webp",
+                        image::ImageFormat::Tiff => "tiff",
+                        image::ImageFormat::Avif => "avif",
+                        _ => "dat",
+                    };
+                    let out_path = dir.join(format!("{}.{}", stem, ext));
+                    
+                    let img_rgba8 = image::DynamicImage::ImageRgba8(img.into_rgba8());
+                    
+                    if let Err(e) = img_rgba8.save_with_format(&out_path, fmt) {
+                        fails += 1;
+                        last_err = e.to_string();
+                    } else {
+                        success += 1;
+                    }
+                }
+                Err(e) => {
+                    fails += 1;
+                    last_err = e.to_string();
+                }
+            }
+        }
+        (success, fails, last_err)
+    }).await.unwrap_or((0, count, "Thread crashed".to_string()));
+    
+    if res.1 > 0 {
+        if res.0 == 0 {
+            return Err(format!("Transcode failed. Last error: {}", res.2));
+        } else {
+            return Ok(format!("Transcoded {} files. Failed: {}. Last error: {}", res.0, res.1, res.2));
+        }
+    }
+    
+    Ok(format!("Successfully transcoded {} files to {} inside the \"Transcoded\" subfolder!", res.0, target_format.to_uppercase()))
+}
+
 fn main() {
     let cache = LibraryCache::open_default().expect("Failed to open cache");
     let app_state = Arc::new(AppState {
@@ -690,6 +929,7 @@ fn main() {
         preview_cache: RwLock::new(HashMap::new()),
         recent_folders: RwLock::new(load_recent_folders()),
         resolved_thumbs: RwLock::new(HashMap::new()),
+        watcher: RwLock::new(None),
     });
 
     let mut builder = tauri::Builder::default()
@@ -831,7 +1071,13 @@ fn main() {
             add_recent_folder,
             trigger_macos_sound,
             get_dominant_colors,
+            delete_physical_file,
+            create_physical_folder,
+            get_folder_tags_summary,
+            batch_transcode,
+            find_visual_duplicates,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+

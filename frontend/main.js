@@ -27,10 +27,10 @@ app.innerHTML = `
       <h1>Folio</h1>
       <p class="tagline">Your photography, undistracted.</p>
       <div class="welcome-dropzone" id="welcomeDropzone">
-        <span class="drop-icon">📥</span>
-        <span class="drop-text">Drop Folder Here</span>
+        <span class="drop-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4"/><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg></span>
+        <span class="drop-text">Drop folder here</span>
       </div>
-      <button class="welcome-btn" id="openBtn"><span>Open Folder</span></button>
+      <button class="welcome-btn" id="openBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg><span>Open Folder</span></button>
       <div class="recent-folders" id="recentFolders"></div>
       <div class="welcome-shortcuts">
         <span><kbd>⇧</kbd> + Scroll to Zoom</span>
@@ -49,7 +49,8 @@ app.innerHTML = `
     </div>
 
     <div class="sidebar-controls">
-      <button class="sidebar-btn" id="openBtn2"><span class="icon">📂</span> Open Folder</button>
+      <button class="sidebar-btn" id="openBtn2"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg> Open Folder</button>
+      <button class="sidebar-btn" id="sidebarCatalogBtn" style="margin-top: 6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> Media Catalog</button>
     </div>
     <div class="sidebar-divider"></div>
     <div class="sidebar-info">
@@ -59,8 +60,45 @@ app.innerHTML = `
       <span class="format-badge" id="badge" style="display:none"></span>
     </div>
     <div class="sidebar-divider"></div>
+    <div class="tag-filter-panel" id="tagFilterPanel">
+      <span class="tag-filter-header">Filter by Tag</span>
+      <div class="tag-filter-list" id="tagFilterList"></div>
+    </div>
+    <div class="sidebar-divider"></div>
     <div class="filmstrip" id="filmstrip"></div>
     <div class="sidebar-resizer" id="sidebarResizer"></div>
+  </div>
+
+  <div class="catalog-grid-view" id="catalogGrid" style="display:none">
+    <div class="catalog-header" id="cDrag" data-tauri-drag-region>
+      <h2 id="catalogTitle">Catalog Grid</h2>
+      <div class="catalog-header-actions">
+        <button class="catalog-btn" id="catalogDuplicatesBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z"/></svg> Find Duplicates</button>
+        <button class="catalog-btn" id="catalogNewFolderBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg> New Folder</button>
+        <button class="catalog-btn" data-tooltip="⇧/⌘ + Click to select multiple" style="opacity: 0.5; padding: 6px 8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></button>
+        <button class="catalog-btn" id="catalogCloseBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Close Grid</button>
+      </div>
+    </div>
+    <div class="catalog-content" id="catalogContent"></div>
+    <div class="transcode-hud" id="transcodeHud">
+      <span class="transcode-hud-title" id="transcodeCount">0 items selected</span>
+      <button class="transcode-btn" data-fmt="webp">WebP</button>
+      <button class="transcode-btn" data-fmt="png">PNG</button>
+      <button class="transcode-btn" data-fmt="jpeg">JPEG</button>
+      <button class="transcode-btn" data-fmt="avif">AVIF</button>
+      <button class="transcode-btn" data-fmt="tiff">TIFF</button>
+      <button class="transcode-btn" id="transcodeClose" style="background:transparent; border-color:transparent; margin-left: 8px; display:flex; align-items:center;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div>
+  </div>
+
+  <div class="map-modal" id="mapModal" style="display:none">
+    <div class="map-container">
+      <div class="map-header">
+        <span class="map-title"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 6px;"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 1118 0z"/><circle cx="12" cy="10" r="3"/></svg>Image Location</span>
+        <button class="map-close-btn" id="mapCloseBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      </div>
+      <iframe class="map-iframe" id="mapIframe" frameborder="0" src=""></iframe>
+    </div>
   </div>
 
   <div class="viewer" id="viewer" style="display:none">
@@ -91,6 +129,10 @@ app.innerHTML = `
         <span class="editorial-stat-label">Dominant Palette</span>
         <div id="paletteChips" style="display: flex; gap: 8px; margin-top: 4px;"></div>
       </div>
+      <div class="editorial-gps" id="edGps" style="margin-top: 12px; display: none; flex-direction: column; gap: 6px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 12px;">
+        <span class="editorial-stat-label">Location</span>
+        <button class="gps-chip" id="gpsChip" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); color: var(--accent-gold); padding: 6px 10px; border-radius: 8px; font-size: 0.72rem; cursor: pointer; display: flex; align-items: center; gap: 6px; width: fit-content; transition: all 0.25s var(--ease-spring); font-family: var(--font-body); font-weight: 500;"></button>
+      </div>
     </div>
     <button class="nav-arrow prev" id="prev">‹</button>
     <button class="nav-arrow next" id="next">›</button>
@@ -98,6 +140,7 @@ app.innerHTML = `
       <input type="range" id="zoomSlider" min="100" max="800" value="100" step="10" />
       <span class="zoom-label" id="zoomLabel">100%</span>
       <button class="zoom-reset" id="zoomReset" data-tooltip="Fit to Screen (0)">FIT</button>
+      <button class="zoom-action compare-toggle-btn" id="compareBtn" data-tooltip="Compare Before/After (C)" style="display:none">COMPARE</button>
       <button class="zoom-action fullscreen-toggle" id="fullscreenBtn" data-tooltip="Enter Fullscreen (F)">FULL</button>
     </div>
 
@@ -107,7 +150,7 @@ app.innerHTML = `
         <div class="edit-panel-actions">
           <button class="edit-action-btn" id="editResetBtn">Reset</button>
           <button class="edit-action-btn edit-export-btn" id="editExportBtn">Export</button>
-          <button class="edit-close-btn" id="editCloseBtn">×</button>
+          <button class="edit-close-btn" id="editCloseBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
       </div>
       <div class="edit-sliders">
@@ -139,7 +182,7 @@ app.innerHTML = `
     <div class="settings-content">
       <div class="settings-header">
         <h2>Settings</h2>
-        <button class="settings-close" id="settingsClose">×</button>
+        <button class="settings-close" id="settingsClose"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
       <div class="settings-body">
         <div class="settings-tabs">
@@ -149,6 +192,7 @@ app.innerHTML = `
         </div>
 
         <div class="tab-pane active" id="tab-general">
+          <div class="settings-section-label">Interface</div>
           <div class="setting-row">
             <label for="sortSelect">Sort By</label>
             <select id="sortSelect">
@@ -159,15 +203,32 @@ app.innerHTML = `
           </div>
           <div class="setting-row">
            <label for="zoomSensSlider">Zoom Sensitivity</label>
-           <input type="range" id="zoomSensSlider" min="1" max="10" value="5" />
+           <input type="range" id="zoomSensSlider" min="1" max="10" value="5" style="width: 120px;" />
           </div>
           <div class="setting-row">
             <label for="recentFoldersCheck">Show Recent Folders</label>
             <input type="checkbox" id="recentFoldersCheck" checked />
           </div>
           <div class="setting-row">
-            <label for="stripMetadataCheck">Scrub EXIF Metadata on Export</label>
-            <input type="checkbox" id="stripMetadataCheck" checked />
+            <label for="soundVolumeSlider">UI Sound Volume</label>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <input type="range" id="soundVolumeSlider" min="0" max="100" value="40" style="width: 100px;" />
+              <span class="setting-val" id="soundVolumeVal" style="font-size: 0.7rem; color: var(--text-tertiary); min-width: 32px; text-align: right; font-variant-numeric: tabular-nums;">40%</span>
+            </div>
+          </div>
+          <div class="settings-section-label">Export</div>
+          <div class="setting-row">
+            <label for="stripMetadataCheck">Scrub EXIF Metadata</label>
+            <input type="checkbox" id="stripMetadataCheck" />
+          </div>
+          <div>
+            <div class="watermark-toggle-row">
+              <label for="watermarkToggle">Export Watermark</label>
+              <input type="checkbox" id="watermarkToggle" />
+            </div>
+            <div class="watermark-input-row" id="watermarkInputRow">
+              <input type="text" id="watermarkInput" placeholder="Enter watermark text…" />
+            </div>
           </div>
         </div>
         <div class="tab-pane" id="tab-appearance">
@@ -176,6 +237,15 @@ app.innerHTML = `
             <select id="themeSelect">
               <option value="dark">Dark</option>
               <option value="light">Light</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label for="colorBlindSelect">Color Blindness Simulator</label>
+            <select id="colorBlindSelect">
+              <option value="none">None</option>
+              <option value="protanopia">Protanopia (Red-Blind)</option>
+              <option value="deuteranopia">Deuteranopia (Green-Blind)</option>
+              <option value="tritanopia">Tritanopia (Blue-Blind)</option>
             </select>
           </div>
           <div class="setting-row">
@@ -225,6 +295,30 @@ app.innerHTML = `
             <label>Pan Modifier (Middle Click)</label>
             <button class="keybind-btn" data-action="modifierPan"></button>
           </div>
+          <div class="setting-row">
+            <label>Toggle Zen Mode</label>
+            <button class="keybind-btn" data-action="toggleZen"></button>
+          </div>
+          <div class="setting-row">
+            <label>Toggle Sidebar</label>
+            <button class="keybind-btn" data-action="toggleSidebar"></button>
+          </div>
+          <div class="setting-row">
+            <label>Toggle Fullscreen</label>
+            <button class="keybind-btn" data-action="toggleFullscreen"></button>
+          </div>
+          <div class="setting-row">
+            <label>Toggle Edit Panel</label>
+            <button class="keybind-btn" data-action="editMode"></button>
+          </div>
+          <div class="setting-row">
+            <label>Add Tag</label>
+            <button class="keybind-btn" data-action="addTag"></button>
+          </div>
+          <div class="setting-row">
+            <label>Toggle Catalog Grid</label>
+            <button class="keybind-btn" data-action="toggleCatalog"></button>
+          </div>
         </div>
       </div>
     </div>
@@ -233,17 +327,31 @@ app.innerHTML = `
   <div class="update-bar" id="updateBar" style="display:none">
     <span class="update-text" id="updateText"></span>
     <button class="update-action" id="updateAction">Update</button>
-    <button class="update-dismiss" id="updateDismiss">×</button>
+    <button class="update-dismiss" id="updateDismiss"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
   </div>
 
   <div class="custom-cursor" id="customCursor"></div>
   <div class="dropzone-glow" id="dropzoneGlow"></div>
   <div id="toastContainer" class="toast-container"></div>
+  <svg width="0" height="0" style="position: absolute; pointer-events: none;">
+    <defs>
+      <filter id="sim-protanopia"><feColorMatrix type="matrix" values="0.567 0.433 0 0 0  0.558 0.442 0 0 0  0 0.242 0.758 0 0  0 0 0 1 0" /></filter>
+      <filter id="sim-deuteranopia"><feColorMatrix type="matrix" values="0.625 0.375 0 0 0  0.7 0.3 0 0 0  0 0.3 0.7 0 0  0 0 0 1 0" /></filter>
+      <filter id="sim-tritanopia"><feColorMatrix type="matrix" values="0.95 0.05 0 0 0  0 0.433 0.567 0 0  0 0.475 0.525 0 0  0 0 0 1 0" /></filter>
+    </defs>
+  </svg>
 `;
 
 /* ── DOM REFS ── */
 const $ = id => document.getElementById(id);
-const welcome = $('welcome'), welcomeBg = $('welcomeBg'), sidebar = $('sidebar'), sidebarResizer = $('sidebarResizer'), sidebarToggle = $('sidebarToggle'), viewer = $('viewer'), media = $('media'), mediaLoader = $('mediaLoader'), filmstrip = $('filmstrip'), breadcrumbs = $('breadcrumbs'), gridToggleBtn = $('gridToggleBtn'), counter = $('counter'), fname = $('fname'), dims = $('dims'), badge = $('badge'), edOverlay = $('editorialOverlay'), edCamera = $('edCamera'), edAperture = $('edAperture'), edShutter = $('edShutter'), edIso = $('edIso'), edFocal = $('edFocal'), edTechData = $('edTechData'), backdropGlow = $('backdropGlow'), editPanel = $('editPanel'), editToggleBtn = $('editToggleBtn'), editCloseBtn = $('editCloseBtn'), editResetBtn = $('editResetBtn'), editExportBtn = $('editExportBtn'), rotateBtn = $('rotateBtn'), flipHBtn = $('flipHBtn'), flipVBtn = $('flipVBtn'), cropBtn = $('cropBtn'), customCursor = $('customCursor'), customCursorCheck = $('customCursorCheck'), dropzoneGlow = $('dropzoneGlow'), zoomSlider = $('zoomSlider'), zoomLabel = $('zoomLabel'), zoomReset = $('zoomReset'), fullscreenBtn = $('fullscreenBtn'), imageFsExit = $('imageFsExit'), sortSelect = $('sortSelect'), zoomSensSlider = $('zoomSensSlider'), themeSelect = $('themeSelect'), cinematicCheck = $('cinematicCheck'), recentFoldersCheck = $('recentFoldersCheck'), stripMetadataCheck = $('stripMetadataCheck'), vibrancyCheck = $('vibrancyCheck');
+const welcome = $('welcome'), welcomeBg = $('welcomeBg'), sidebar = $('sidebar'), sidebarResizer = $('sidebarResizer'), sidebarToggle = $('sidebarToggle'), viewer = $('viewer'), media = $('media'), mediaLoader = $('mediaLoader'), filmstrip = $('filmstrip'), breadcrumbs = $('breadcrumbs'), gridToggleBtn = $('gridToggleBtn'), counter = $('counter'), fname = $('fname'), dims = $('dims'), badge = $('badge'), edOverlay = $('editorialOverlay'), edCamera = $('edCamera'), edAperture = $('edAperture'), edShutter = $('edShutter'), edIso = $('edIso'), edFocal = $('edFocal'), edTechData = $('edTechData'), backdropGlow = $('backdropGlow'), editPanel = $('editPanel'), editToggleBtn = $('editToggleBtn'), editCloseBtn = $('editCloseBtn'), editResetBtn = $('editResetBtn'), editExportBtn = $('editExportBtn'), rotateBtn = $('rotateBtn'), flipHBtn = $('flipHBtn'), flipVBtn = $('flipVBtn'), cropBtn = $('cropBtn'), customCursor = $('customCursor'), customCursorCheck = $('customCursorCheck'), dropzoneGlow = $('dropzoneGlow'), zoomSlider = $('zoomSlider'), zoomLabel = $('zoomLabel'), zoomReset = $('zoomReset'), fullscreenBtn = $('fullscreenBtn'), imageFsExit = $('imageFsExit'), sortSelect = $('sortSelect'), zoomSensSlider = $('zoomSensSlider'), themeSelect = $('themeSelect'), cinematicCheck = $('cinematicCheck'), recentFoldersCheck = $('recentFoldersCheck'), stripMetadataCheck = $('stripMetadataCheck'), vibrancyCheck = $('vibrancyCheck'), soundVolumeSlider = $('soundVolumeSlider'), soundVolumeVal = $('soundVolumeVal'), catalogGrid = $('catalogGrid'), catalogContent = $('catalogContent'), catalogTitle = $('catalogTitle'), catalogNewFolderBtn = $('catalogNewFolderBtn'), catalogDuplicatesBtn = $('catalogDuplicatesBtn'), catalogCloseBtn = $('catalogCloseBtn'), tagFilterPanel = $('tagFilterPanel'), tagFilterList = $('tagFilterList'), sidebarCatalogBtn = $('sidebarCatalogBtn'), edGps = $('edGps'), gpsChip = $('gpsChip'), mapModal = $('mapModal'), mapCloseBtn = $('mapCloseBtn'), mapIframe = $('mapIframe'), compareBtn = $('compareBtn'), transcodeHud = $('transcodeHud'), transcodeCount = $('transcodeCount'), transcodeClose = $('transcodeClose'), colorBlindSelect = $('colorBlindSelect'), watermarkInput = $('watermarkInput');
+
+let catalogModeActive = false;
+let compareModeActive = false;
+let compareClipPct = 50;
+let selectedCatalogPaths = new Set();
+let gridThumbSize = 160;
+let activeTagFilter = null;
 
 /* ── Settings & State ── */
 let currentSort = localStorage.getItem('folio_sort') || 'name';
@@ -252,9 +360,12 @@ let currentTheme = localStorage.getItem('folio_theme') || 'dark';
 let cinematicEnabled = localStorage.getItem('folio_cinematic') !== 'false';
 let useCustomCursor = localStorage.getItem('folio_custom_cursor') !== 'false';
 let showRecentFolders = localStorage.getItem('folio_show_recents') !== 'false';
-let stripMetadataEnabled = localStorage.getItem('folio_strip_metadata') !== 'false';
+let stripMetadataEnabled = localStorage.getItem('folio_strip_metadata') === 'true';
+let soundVolume = parseInt(localStorage.getItem('folio_sound_volume') ?? '40');
 let vibrancyEnabled = localStorage.getItem('folio_vibrancy') === 'true';
 let gridView = localStorage.getItem('folio_grid_view') === 'true';
+let activeColorBlindMode = localStorage.getItem('folio_color_blind') || 'none';
+let activeWatermark = localStorage.getItem('folio_watermark') || '';
 
 let trafficLightHover = false;
 let pendingRafUpdate = false;
@@ -265,7 +376,7 @@ const editMap = new Map();
 const preloadedThumbs = new Map();
 const preloadCache = new Map();
 
-const defaultKeybinds = { nextImage: 'ArrowRight', prevImage: 'ArrowLeft', resetZoom: '0', toggleMetadata: 'i', playVideo: ' ', modifierZoom: 'Shift', modifierPan: 'Shift' };
+const defaultKeybinds = { nextImage: 'ArrowRight', prevImage: 'ArrowLeft', resetZoom: '0', toggleMetadata: 'i', playVideo: ' ', modifierZoom: 'Shift', modifierPan: 'Shift', toggleZen: 'z', toggleSidebar: 'b', toggleFullscreen: 'f', editMode: 'e', addTag: 't', toggleCatalog: 'g' };
 let keybinds = { ...defaultKeybinds, ...JSON.parse(localStorage.getItem('folio_keybinds') || '{}') };
 
 /* ── Init ── */
@@ -285,6 +396,21 @@ if (stripMetadataCheck) {
     localStorage.setItem('folio_strip_metadata', stripMetadataEnabled);
   });
 }
+if (soundVolumeSlider) {
+  soundVolumeSlider.value = soundVolume;
+  if (soundVolumeVal) soundVolumeVal.textContent = `${soundVolume}%`;
+  
+  const updateVol = (e) => {
+    soundVolume = parseInt(e.target.value);
+    if (soundVolumeVal) soundVolumeVal.textContent = `${soundVolume}%`;
+    localStorage.setItem('folio_sound_volume', soundVolume);
+  };
+  soundVolumeSlider.addEventListener('input', updateVol);
+  soundVolumeSlider.addEventListener('change', (e) => {
+    updateVol(e);
+    playUISound('success');
+  });
+}
 if (vibrancyCheck) {
   vibrancyCheck.checked = vibrancyEnabled;
   vibrancyCheck.addEventListener('change', (e) => {
@@ -295,6 +421,52 @@ if (vibrancyCheck) {
 }
 // Apply initial vibrancy if enabled
 if (vibrancyEnabled) invoke('set_window_vibrancy', { enabled: true });
+
+if (colorBlindSelect) {
+  colorBlindSelect.value = activeColorBlindMode;
+  colorBlindSelect.addEventListener('change', (e) => {
+    activeColorBlindMode = e.target.value;
+    localStorage.setItem('folio_color_blind', activeColorBlindMode);
+    applyColorBlindMode();
+  });
+}
+
+const watermarkToggle = $('watermarkToggle');
+const watermarkInputRow = $('watermarkInputRow');
+if (watermarkToggle && watermarkInput && watermarkInputRow) {
+  const hasWatermark = activeWatermark.length > 0;
+  watermarkToggle.checked = hasWatermark;
+  watermarkInput.value = activeWatermark;
+  if (hasWatermark) watermarkInputRow.classList.add('visible');
+
+  watermarkToggle.addEventListener('change', (e) => {
+    if (e.target.checked) {
+      watermarkInputRow.classList.add('visible');
+      watermarkInput.focus();
+    } else {
+      watermarkInputRow.classList.remove('visible');
+      watermarkInput.value = '';
+      activeWatermark = '';
+      localStorage.setItem('folio_watermark', '');
+    }
+  });
+  watermarkInput.addEventListener('input', (e) => {
+    activeWatermark = e.target.value;
+    localStorage.setItem('folio_watermark', activeWatermark);
+  });
+}
+function applyColorBlindMode() {
+  if (activeColorBlindMode === 'none') {
+    viewer.style.filter = '';
+    filmstrip.style.filter = '';
+    catalogGrid.style.filter = '';
+  } else {
+    viewer.style.filter = `url(#sim-${activeColorBlindMode})`;
+    filmstrip.style.filter = `url(#sim-${activeColorBlindMode})`;
+    catalogGrid.style.filter = `url(#sim-${activeColorBlindMode})`;
+  }
+}
+applyColorBlindMode();
 
 /* ── Core UI Methods ── */
 function applyTheme(theme) {
@@ -422,6 +594,11 @@ makeEditable(edShutter, 'shutter');
 makeEditable(edIso, 'iso');
 makeEditable(edFocal, 'focal');
 
+function playUISound(name) {
+  const volume = parseFloat(localStorage.getItem('folio_sound_volume') ?? '40') / 100;
+  invoke('trigger_macos_sound', { name, volume }).catch(()=>{});
+}
+
 let activeToasts = [];
 function showToast(message) {
   const container = $('toastContainer');
@@ -434,7 +611,7 @@ function showToast(message) {
   activeToasts.push(toast);
   
   const type = message.toLowerCase().includes('fail') || message.toLowerCase().includes('error') ? 'error' : 'success';
-  invoke('trigger_macos_sound', { name: type }).catch(()=>{});
+  playUISound(type);
 
   const updateStack = () => {
     activeToasts.forEach((t, i) => {
@@ -548,7 +725,7 @@ async function renderRecentFolders() {
       const name = path.split('/').pop() || path;
       card.innerHTML = `
         <span class="recent-name">${name}</span>
-        <span class="recent-path">${path}</span>
+        <span class="recent-path">${path.replace(/^\/Users\/[^\/]+/, '~')}</span>
       `;
       card.addEventListener('click', async () => {
         try {
@@ -570,10 +747,21 @@ async function loadFolderData(p) {
   items = await invoke('get_folder_items');
   idx = 0; sortItems();
   welcome.classList.add('hidden');
-  sidebar.style.display = viewer.style.display = 'flex';
   renderBreadcrumbs(p);
-  show(idx);
-  invoke('trigger_macos_sound', { name: 'load' }).catch(()=>{});
+  playUISound('load');
+  await renderTagFilters();
+  filmstrip.scrollTop = 0;
+  if (catalogModeActive) {
+    catalogGrid.style.display = 'grid';
+    sidebar.style.display = 'none';
+    viewer.style.display = 'none';
+    buildCatalogContent();
+  } else {
+    catalogGrid.style.display = 'none';
+    sidebar.style.display = 'flex';
+    viewer.style.display = 'flex';
+    show(idx);
+  }
 }
 
 function renderBreadcrumbs(path) {
@@ -688,7 +876,13 @@ function show(i, dir = null) {
   zoomSlider.value = 100; zoomLabel.textContent = '100%';
   
   const item = items[i], src = `folio://localhost/${encodeURIComponent(item.path)}`, outgoing = media.querySelector('.media-layer.media-active');
-  if (outgoing) { if (cinematicEnabled && direction !== 0) applyPhysicalExit(outgoing, direction); else outgoing.remove(); }
+  if (outgoing) {
+    if (cinematicEnabled && direction !== 0) {
+      applyPhysicalExit(outgoing, direction);
+    } else {
+      outgoing.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 400, easing: 'ease-out' }).finished.then(() => outgoing.remove());
+    }
+  }
   clearMediaContent(outgoing);
   
   const layer = document.createElement('div'); layer.className = 'media-layer media-active';
@@ -700,7 +894,10 @@ function show(i, dir = null) {
         { opacity: 1, transform: 'translate3d(0, 0, 0) scale(1) rotate(0deg)' }
     ], { duration: 750, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'forwards' }));
   } else {
-    layer.style.opacity = '1';
+    requestAnimationFrame(() => layer.animate([
+        { opacity: 0 },
+        { opacity: 1 }
+    ], { duration: 400, easing: 'ease-out', fill: 'forwards' }));
     layer.style.transform = 'none';
   }
   
@@ -713,9 +910,9 @@ function show(i, dir = null) {
       v.classList.add('loaded');
       const ctrl = document.createElement('div');
       ctrl.className = 'video-controls';
-      ctrl.innerHTML = `<button class="v-play-btn">⏸</button><input type="range" class="v-progress" value="0" min="0" max="100"><span class="v-time">0:00</span>`;
+      ctrl.innerHTML = `<button class="v-play-btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></button><input type="range" class="v-progress" value="0" min="0" max="100"><span class="v-time">0:00</span>`;
       const playBtn = ctrl.querySelector('.v-play-btn'), progress = ctrl.querySelector('.v-progress'), time = ctrl.querySelector('.v-time');
-      playBtn.onclick = () => { if (v.paused) { v.play(); playBtn.textContent = '⏸'; } else { v.pause(); playBtn.textContent = '▶'; } };
+      playBtn.onclick = () => { if (v.paused) { v.play(); playBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>'; } else { v.pause(); playBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="6,3 20,12 6,21"/></svg>'; } };
       v.ontimeupdate = () => { const p = (v.currentTime / v.duration) * 100; progress.value = p; const mins = Math.floor(v.currentTime / 60), secs = Math.floor(v.currentTime % 60); time.textContent = `${mins}:${secs.toString().padStart(2, '0')}`; };
       progress.oninput = () => { v.currentTime = (progress.value / 100) * v.duration; };
       layer.appendChild(ctrl);
@@ -787,11 +984,25 @@ function show(i, dir = null) {
     edShutter.textContent = item.exif.shutter_speed || '—';
     edIso.textContent = item.exif.iso || '—';
     edFocal.textContent = item.exif.focal_length || '—';
+    if (item.exif.latitude !== undefined && item.exif.latitude !== null && item.exif.longitude !== undefined && item.exif.longitude !== null) {
+      const lat = item.exif.latitude;
+      const lon = item.exif.longitude;
+      edGps.style.display = 'flex';
+      const latRef = lat >= 0 ? 'N' : 'S';
+      const lonRef = lon >= 0 ? 'E' : 'W';
+      gpsChip.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -1px;"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 1118 0z"/><circle cx="12" cy="10" r="3"/></svg> ${Math.abs(lat).toFixed(4)}° ${latRef}, ${Math.abs(lon).toFixed(4)}° ${lonRef}`;
+      gpsChip.onclick = () => {
+        showMapPopup(lat, lon);
+      };
+    } else {
+      edGps.style.display = 'none';
+    }
     const isRaw = !['jpg','jpeg','png','webp'].includes(item.path.split('.').pop().toLowerCase());
     if (isRaw && edTechData) { edTechData.style.display = 'block'; edTechData.innerHTML = `<span>Format: ${badge.textContent}</span><span>Bit Depth: 14-bit</span>`; }
     else if (edTechData) edTechData.style.display = 'none';
   } else {
     edCamera.textContent = 'No Metadata'; edAperture.textContent = edShutter.textContent = edIso.textContent = edFocal.textContent = '—';
+    edGps.style.display = 'none';
     if (edTechData) edTechData.style.display = 'none';
   }
   
@@ -801,16 +1012,72 @@ function show(i, dir = null) {
   triggerPreload(i);
 }
 
-function updateAdaptiveGlow(el) {
-  if (!backdropGlow) return;
+function hexToHSL(hex) {
+  let r = 0, g = 0, b = 0;
+  if (hex.startsWith('#')) hex = hex.substring(1);
+  if (hex.length === 3) {
+    r = parseInt(hex[0] + hex[0], 16);
+    g = parseInt(hex[1] + hex[1], 16);
+    b = parseInt(hex[2] + hex[2], 16);
+  } else if (hex.length === 6) {
+    r = parseInt(hex.substring(0, 2), 16);
+    g = parseInt(hex.substring(2, 4), 16);
+    b = parseInt(hex.substring(4, 6), 16);
+  }
+  
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h, s, l = (max + min) / 2;
+
+  if (max === min) {
+    h = s = 0;
+  } else {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / d + 2; break;
+      case b: h = (r - g) / d + 4; break;
+    }
+    h /= 6;
+  }
+
+  return {
+    h: Math.round(h * 360),
+    s: Math.round(s * 100),
+    l: Math.round(l * 100)
+  };
+}
+
+async function updateAdaptiveGlow(el) {
+  if (!backdropGlow || !items || !items[idx]) return;
   try {
-    const color = extractDominantColor(el);
-    const rgb = color.match(/\d+/g);
-    if (rgb && rgb.length >= 3) {
-      const r = parseInt(rgb[0]), g = parseInt(rgb[1]), b = parseInt(rgb[2]);
-      const c1 = `rgba(${r}, ${g}, ${b}, 0.22)`;
-      const c2 = `rgba(${g}, ${b}, ${r}, 0.16)`;
-      const c3 = `rgba(${b}, ${r}, ${g}, 0.12)`;
+    const item = items[idx];
+    if (item.is_video) {
+      const color = extractDominantColor(el);
+      const rgb = color.match(/\d+/g);
+      if (rgb && rgb.length >= 3) {
+        const r = parseInt(rgb[0]), g = parseInt(rgb[1]), b = parseInt(rgb[2]);
+        const c1 = `rgba(${r}, ${g}, ${b}, 0.22)`;
+        const c2 = `rgba(${g}, ${b}, ${r}, 0.16)`;
+        const c3 = `rgba(${b}, ${r}, ${g}, 0.12)`;
+        
+        backdropGlow.style.setProperty('--glow-c1', c1);
+        backdropGlow.style.setProperty('--glow-c2', c2);
+        backdropGlow.style.setProperty('--glow-c3', c3);
+      }
+      return;
+    }
+    
+    const colors = await invoke('get_dominant_colors', { path: item.path });
+    if (colors && colors.length >= 3) {
+      const hsl1 = hexToHSL(colors[0]);
+      const hsl2 = hexToHSL(colors[1]);
+      const hsl3 = hexToHSL(colors[2]);
+      
+      const c1 = `hsla(${hsl1.h}, ${hsl1.s}%, ${Math.min(50, hsl1.l)}%, 0.24)`;
+      const c2 = `hsla(${hsl2.h}, ${hsl2.s}%, ${Math.min(50, hsl2.l)}%, 0.18)`;
+      const c3 = `hsla(${hsl3.h}, ${hsl3.s}%, ${Math.min(50, hsl3.l)}%, 0.14)`;
       
       backdropGlow.style.setProperty('--glow-c1', c1);
       backdropGlow.style.setProperty('--glow-c2', c2);
@@ -866,6 +1133,7 @@ function buildFilmstrip() {
   items.forEach((it, i) => {
     const d = document.createElement('div'); d.className = i === idx ? 'thumb active' : 'thumb'; d.dataset.path = it.path;
     d.onclick = () => show(i, i === idx ? 0 : (i > idx ? 1 : -1));
+    d.oncontextmenu = (e) => showContextMenu(e, it.path, i);
     
     if (it.is_video) {
         const v = document.createElement('video');
@@ -877,7 +1145,7 @@ function buildFilmstrip() {
         
         const icon = document.createElement('div');
         icon.className = 'vid-icon-small';
-        icon.innerHTML = '▶';
+        icon.innerHTML = '<svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="6,3 20,12 6,21"/></svg>';
         d.appendChild(icon);
     } else {
         const img = document.createElement('img'); img.crossOrigin = "anonymous"; d.appendChild(img);
@@ -887,21 +1155,30 @@ function buildFilmstrip() {
     dotsContainer.className = 'thumb-tag-dots';
     d.appendChild(dotsContainer);
     
-    invoke('get_image_tags', { path: it.path }).then(tags => {
-      tags.forEach(t => {
-        const dot = document.createElement('div');
-        dot.className = 'thumb-tag-dot';
-        dot.style.background = t.color;
-        dot.title = t.name;
-        dotsContainer.appendChild(dot);
-      });
-    }).catch(()=>{});
+    const cachedTags = folderTagsCache.get(it.path) || [];
+    cachedTags.forEach(t => {
+      const dot = document.createElement('div');
+      dot.className = 'thumb-tag-dot';
+      dot.style.background = t.color;
+      dot.title = t.name;
+      dotsContainer.appendChild(dot);
+    });
     
     filmstrip.appendChild(d); obs.observe(d);
   });
 }
 
-function highlightThumb() { document.querySelectorAll('.thumb').forEach((t, i) => { if (i === idx) { t.classList.add('active'); filmstrip.scrollTo({ top: t.offsetTop - filmstrip.clientHeight/2 + t.clientHeight/2, behavior: 'smooth' }); } else t.classList.remove('active'); }); }
+function highlightThumb() {
+  const activePath = items[idx]?.path;
+  document.querySelectorAll('.thumb').forEach(t => {
+    if (t.dataset.path === activePath) {
+      t.classList.add('active');
+      filmstrip.scrollTo({ top: t.offsetTop - filmstrip.clientHeight / 2 + t.clientHeight / 2, behavior: 'smooth' });
+    } else {
+      t.classList.remove('active');
+    }
+  });
+}
 
 /* ── Simple Edit Engine ── */
 const defaultEdit = () => ({ brightness: 0, vibrance: 0, flip_h: false, flip_v: false, rotate: 0 });
@@ -911,6 +1188,7 @@ function setCurrentEdit(edit) { if (items[idx]?.path) { editMap.set(items[idx].p
 async function openEditPanel() {
   const path = items[idx]?.path; if (!path || items[idx]?.is_video) return;
   editPanelOpen = true; editPanel.classList.add('visible'); editPanel.setAttribute('aria-hidden', 'false'); editToggleBtn.classList.add('active');
+  if (compareBtn) compareBtn.style.display = 'inline-block';
   requestAnimationFrame(() => { if (zoom <= 1) resetZoom(); else scheduleUpdate(); });
   try { await invoke('prepare_edit_preview', { path }); loadEditForCurrent(); } catch (e) { console.error(e); }
 }
@@ -1090,6 +1368,10 @@ function closeEditPanel() {
   editPanel.classList.remove('visible');
   editPanel.setAttribute('aria-hidden', 'true');
   editToggleBtn.classList.remove('active');
+  if (compareBtn) {
+    compareBtn.style.display = 'none';
+    toggleCompareMode(false);
+  }
   closeCropMode();
   removeEditPreview();
   requestAnimationFrame(() => { if (zoom <= 1) resetZoom(); else scheduleUpdate(); });
@@ -1164,15 +1446,79 @@ sidebarToggle.addEventListener('click', () => {
 });
 
 gridToggleBtn?.addEventListener('click', () => {
-  gridView = !gridView;
-  localStorage.setItem('folio_grid_view', gridView);
-  buildFilmstrip();
+  toggleCatalogView(!catalogModeActive);
+});
+
+sidebarCatalogBtn?.addEventListener('click', () => {
+  toggleCatalogView(!catalogModeActive);
+});
+
+let duplicateGroupsCache = null;
+
+catalogDuplicatesBtn?.addEventListener('click', async () => {
+  if (!items || items.length === 0) return;
+  if (duplicateGroupsCache) {
+    duplicateGroupsCache = null;
+    catalogDuplicatesBtn.classList.remove('active');
+    buildCatalogContent();
+    return;
+  }
+  
+  catalogDuplicatesBtn.textContent = '⏳ Analyzing...';
+  catalogDuplicatesBtn.style.pointerEvents = 'none';
+  showToast('Computing perceptual hashes for the catalog...');
+  
+  try {
+    const paths = items.map(i => i.path);
+    const groups = await invoke('find_visual_duplicates', { paths });
+    
+    if (groups.length === 0) {
+      showToast('No visual duplicates found!');
+    } else {
+      showToast(`Found ${groups.length} group(s) of visual duplicates.`);
+      const colors = ['#E55E5E', '#4FA8EE', '#5BC2A8', '#D4A72C', '#AB6BFA', '#EE4F92'];
+      duplicateGroupsCache = new Map();
+      
+      groups.forEach((group, index) => {
+        const color = colors[index % colors.length];
+        group.forEach(p => {
+          duplicateGroupsCache.set(p, color);
+        });
+      });
+      
+      items.sort((a, b) => {
+        const aHas = duplicateGroupsCache.has(a.path);
+        const bHas = duplicateGroupsCache.has(b.path);
+        if (aHas && !bHas) return -1;
+        if (!aHas && bHas) return 1;
+        return 0;
+      });
+      
+      catalogDuplicatesBtn.classList.add('active');
+      buildCatalogContent();
+    }
+  } catch (e) {
+    showToast(`Failed to analyze duplicates: ${e}`);
+  } finally {
+    catalogDuplicatesBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z"/></svg> Find Duplicates';
+    catalogDuplicatesBtn.style.pointerEvents = 'auto';
+  }
+});
+
+catalogNewFolderBtn?.addEventListener('click', () => {
+  showNewFolderModal();
+});
+
+catalogCloseBtn?.addEventListener('click', () => {
+  toggleCatalogView(false);
 });
 
 let isResizingSidebar = false;
 sidebarResizer.addEventListener('mousedown', (e) => {
   isResizingSidebar = true;
   document.body.style.cursor = 'ew-resize';
+  document.body.style.userSelect = 'none';
+  document.body.style.webkitUserSelect = 'none';
   sidebarResizer.classList.add('dragging');
 });
 
@@ -1186,6 +1532,8 @@ window.addEventListener('mouseup', () => {
   if (isResizingSidebar) {
     isResizingSidebar = false;
     document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    document.body.style.webkitUserSelect = '';
     sidebarResizer.classList.remove('dragging');
   }
 });
@@ -1208,11 +1556,43 @@ cropBtn.addEventListener('click', () => {
   }
 });
 
+function generateWatermarkPayload() {
+  if (!activeWatermark || activeWatermark.trim() === '') return null;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.font = 'bold 120px "Georgia", serif';
+  const text = activeWatermark.trim();
+  const metrics = ctx.measureText(text);
+  canvas.width = metrics.width + 40;
+  canvas.height = 160;
+  ctx.font = 'bold 120px "Georgia", serif';
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+  ctx.shadowBlur = 16;
+  ctx.shadowOffsetX = 2;
+  ctx.shadowOffsetY = 4;
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 20, canvas.height / 2);
+  const dataURL = canvas.toDataURL('image/png');
+  const b64 = dataURL.split(',')[1];
+  const binaryString = window.atob(b64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return Array.from(bytes);
+}
+
 editExportBtn?.addEventListener('click', async () => {
   const p = items[idx]?.path; if (!p) return;
   try {
-    const dest = await save({ defaultPath: p.replace(/(\\.[^.]+)\$/, '_edited$1'), filters: [{ name: 'Image', extensions: ['jpg', 'jpeg', 'png', 'tiff'] }] });
-    if (dest) { await invoke('export_edited', { path: p, dest, stripMetadata: stripMetadataEnabled }); showToast('Exported successfully'); }
+    const dest = await save({ defaultPath: p.replace(/(\.[^.]+)$/, '_edited$1'), filters: [{ name: 'Image', extensions: ['jpg', 'jpeg', 'png', 'tiff'] }] });
+    if (dest) { 
+      const watermarkPayload = generateWatermarkPayload();
+      await invoke('export_edited', { path: p, dest, stripMetadata: stripMetadataEnabled, watermark: watermarkPayload }); 
+      showToast('Exported successfully'); 
+    }
   } catch (e) { showToast('Export failed'); }
 });
 
@@ -1229,10 +1609,12 @@ document.querySelectorAll('.edit-slider').forEach(s => {
 let cursorX = 0, cursorY = 0;
 let targetX = 0, targetY = 0;
 let isHoveringCursor = false;
+let cursorActivated = false;
 
 window.addEventListener('mousemove', (e) => {
   targetX = e.clientX;
   targetY = e.clientY;
+  cursorActivated = true;
   
   const inTL = !isFullscreen && e.clientX <= 80 && e.clientY <= 40;
   if (useCustomCursor) setTrafficLightHover(inTL);
@@ -1240,8 +1622,17 @@ window.addEventListener('mousemove', (e) => {
   isHoveringCursor = !!e.target.closest('button, .thumb, input, select, .welcome-btn, .sidebar-dragbar, .sidebar-toggle, .grid-toggle-btn');
 });
 
+document.addEventListener('mouseleave', () => {
+  cursorActivated = false;
+  if (customCursor) customCursor.style.opacity = 0;
+});
+
+document.addEventListener('mouseenter', () => {
+  cursorActivated = true;
+});
+
 function updateCursorLoop() {
-  if (useCustomCursor && !trafficLightHover) {
+  if (useCustomCursor && !trafficLightHover && cursorActivated) {
     // ProMotion continuous lerp interpolation
     cursorX += (targetX - cursorX) * 0.28;
     cursorY += (targetY - cursorY) * 0.28;
@@ -1291,13 +1682,54 @@ media.addEventListener('mousedown', async (e) => {
 window.addEventListener('mousemove', (e) => { if (isDragging) { panX = e.clientX - startX; panY = e.clientY - startY; scheduleUpdate(); } });
 window.addEventListener('mouseup', () => isDragging = false);
 media.addEventListener('dblclick', (e) => { if (zoom > 1) resetZoom(); else { const r = media.getBoundingClientRect(); setZoom(2.5, e.clientX - r.left - r.width/2, e.clientY - r.top - r.height/2); } });
+media.addEventListener('contextmenu', (e) => {
+  if (items && items.length > 0) {
+    showContextMenu(e, items[idx].path, idx);
+  }
+});
 
 window.addEventListener('keydown', (e) => {
     if (['input', 'textarea', 'select'].includes((e.target?.tagName || '').toLowerCase())) return;
-    if (e.key === 'ArrowRight') nav(1); if (e.key === 'ArrowLeft') nav(-1);
-    if (e.key.toLowerCase() === 'e') editToggleBtn.click();
-    if (e.key.toLowerCase() === 't') { e.preventDefault(); showTagPill(); }
-    if (e.key.toLowerCase() === 'i') {
+    
+    const key = e.key;
+    const keyLower = key.toLowerCase();
+    
+    if (keyLower === 'c' && editPanelOpen) {
+      e.preventDefault();
+      compareBtn?.click();
+      return;
+    }
+    
+    if (catalogModeActive) {
+      if (e.metaKey || e.ctrlKey) {
+        if (key === '=' || key === '+') {
+          e.preventDefault();
+          gridThumbSize = Math.min(400, gridThumbSize + 20);
+          catalogGrid.style.setProperty('--grid-thumb-size', `${gridThumbSize}px`);
+          return;
+        } else if (key === '-') {
+          e.preventDefault();
+          gridThumbSize = Math.max(80, gridThumbSize - 20);
+          catalogGrid.style.setProperty('--grid-thumb-size', `${gridThumbSize}px`);
+          return;
+        }
+      }
+      if (key === 'Escape') {
+        toggleCatalogView(false);
+        return;
+      }
+    }
+    
+    const matchesKey = (bindVal) => {
+      if (!bindVal) return false;
+      return keyLower === bindVal.toLowerCase() || key === bindVal;
+    };
+    
+    if (matchesKey(keybinds.nextImage)) nav(1);
+    else if (matchesKey(keybinds.prevImage)) nav(-1);
+    else if (matchesKey(keybinds.editMode)) editToggleBtn.click();
+    else if (matchesKey(keybinds.addTag)) { e.preventDefault(); showTagPill(); }
+    else if (matchesKey(keybinds.toggleMetadata)) {
         overlayVisible = !overlayVisible;
         edOverlay.classList.toggle('visible', overlayVisible);
         if (overlayVisible) {
@@ -1305,9 +1737,17 @@ window.addEventListener('keydown', (e) => {
             drawDominantColors(items[idx]);
         }
     }
-    if (e.key.toLowerCase() === 'f') toggleFullscreen();
-    if (e.key.toLowerCase() === 'b') sidebarToggle.click();
-    if (e.key.toLowerCase() === 'z') toggleZenMode();
+    else if (matchesKey(keybinds.toggleFullscreen)) toggleFullscreen();
+    else if (matchesKey(keybinds.toggleSidebar)) sidebarToggle.click();
+    else if (matchesKey(keybinds.toggleZen)) toggleZenMode();
+    else if (matchesKey(keybinds.toggleCatalog)) { e.preventDefault(); toggleCatalogView(!catalogModeActive); }
+    else if (matchesKey(keybinds.resetZoom)) resetZoom();
+    else if (key === 'Backspace' || key === 'Delete') {
+      if (items && items.length > 0) {
+        e.preventDefault();
+        showDeleteConfirmation(items[idx].path, idx);
+      }
+    }
 });
 
 /* ── Drag & Drop ── */
@@ -1575,9 +2015,23 @@ welcome.addEventListener('mousemove', (e) => {
   welcomeBg.style.setProperty('--parallax-y', `${y * -20}px`);
 });
 
+function collapseSidebar() {
+  if (sidebar && sidebar.style.display !== 'none') {
+    sidebar.style.display = 'none';
+    if (sidebarToggle) {
+      sidebarToggle.classList.remove('active');
+      sidebarToggle.classList.add('sidebar-closed');
+      sidebarToggle.textContent = 'Sidebar';
+    }
+  }
+}
+
 let zenModeActive = false;
 function toggleZenMode() {
   zenModeActive = !zenModeActive;
+  if (zenModeActive) {
+    collapseSidebar();
+  }
   document.body.classList.toggle('zen-mode', zenModeActive);
   sidebar.classList.toggle('zen-hide', zenModeActive);
   document.getElementById('zoomHud')?.classList.toggle('zen-hide', zenModeActive);
@@ -1586,6 +2040,574 @@ function toggleZenMode() {
   closeCropMode();
   closeEditPanel();
   showToast(zenModeActive ? 'Zen Mode Activated' : 'Zen Mode Deactivated');
+}
+
+function showContextMenu(e, itemPath, itemIndex) {
+  e.preventDefault();
+  
+  let menu = document.getElementById('customContextMenu');
+  if (menu) menu.remove();
+  
+  menu = document.createElement('div');
+  menu.id = 'customContextMenu';
+  menu.className = 'glassmorphic-menu';
+  menu.style.position = 'fixed';
+  menu.style.top = `${e.clientY}px`;
+  menu.style.left = `${e.clientX}px`;
+  menu.style.zIndex = '99999';
+  menu.style.padding = '6px';
+  menu.style.borderRadius = '12px';
+  menu.style.background = 'rgba(20, 20, 20, 0.85)';
+  menu.style.backdropFilter = 'blur(20px) saturate(180%)';
+  menu.style.border = '1px solid rgba(255, 255, 255, 0.08)';
+  menu.style.boxShadow = '0 10px 30px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.02)';
+  menu.style.display = 'flex';
+  menu.style.flexDirection = 'column';
+  menu.style.gap = '2px';
+  menu.style.minWidth = '140px';
+  
+  const deleteBtn = document.createElement('div');
+  deleteBtn.className = 'context-menu-item delete-item';
+  deleteBtn.style.padding = '8px 12px';
+  deleteBtn.style.borderRadius = '8px';
+  deleteBtn.style.cursor = 'pointer';
+  deleteBtn.style.color = '#ff6b6b';
+  deleteBtn.style.fontSize = '13px';
+  deleteBtn.style.display = 'flex';
+  deleteBtn.style.alignItems = 'center';
+  deleteBtn.style.gap = '8px';
+  deleteBtn.style.transition = 'background 0.2s';
+  deleteBtn.innerHTML = '<span>🗑️</span><span>Delete from Disk</span>';
+  
+  deleteBtn.addEventListener('mouseenter', () => {
+    deleteBtn.style.background = 'rgba(255, 107, 107, 0.15)';
+  });
+  deleteBtn.addEventListener('mouseleave', () => {
+    deleteBtn.style.background = 'none';
+  });
+  
+  deleteBtn.addEventListener('click', () => {
+    menu.remove();
+    showDeleteConfirmation(itemPath, itemIndex);
+  });
+  
+  menu.appendChild(deleteBtn);
+  document.body.appendChild(menu);
+  
+  const closeMenu = (evt) => {
+    if (!menu.contains(evt.target)) {
+      menu.remove();
+      document.removeEventListener('mousedown', closeMenu);
+    }
+  };
+  document.addEventListener('mousedown', closeMenu);
+}
+
+function showDeleteConfirmation(itemPath, itemIndex) {
+  let modal = document.createElement('div');
+  modal.className = 'glassmorphic-modal-overlay';
+  modal.style.position = 'fixed';
+  modal.style.top = '0';
+  modal.style.left = '0';
+  modal.style.width = '100vw';
+  modal.style.height = '100vh';
+  modal.style.background = 'rgba(0,0,0,0.5)';
+  modal.style.backdropFilter = 'blur(10px)';
+  modal.style.zIndex = '999999';
+  modal.style.display = 'flex';
+  modal.style.alignItems = 'center';
+  modal.style.justifyContent = 'center';
+  modal.style.opacity = '0';
+  modal.style.transition = 'opacity 0.3s ease';
+  
+  const dialog = document.createElement('div');
+  dialog.className = 'glassmorphic-dialog';
+  dialog.style.background = 'rgba(24, 24, 28, 0.85)';
+  dialog.style.border = '1px solid rgba(255,255,255,0.08)';
+  dialog.style.padding = '24px';
+  dialog.style.borderRadius = '16px';
+  dialog.style.boxShadow = '0 30px 60px rgba(0,0,0,0.7)';
+  dialog.style.maxWidth = '360px';
+  dialog.style.width = '90%';
+  dialog.style.textAlign = 'center';
+  dialog.style.transform = 'scale(0.9)';
+  dialog.style.transition = 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)';
+  
+  const title = document.createElement('h3');
+  title.textContent = 'Delete File Permanently?';
+  title.style.color = '#fff';
+  title.style.fontSize = '17px';
+  title.style.margin = '0 0 10px 0';
+  
+  const desc = document.createElement('p');
+  desc.textContent = `This will permanently delete "${itemPath.split('/').pop()}" from your storage. This action cannot be undone.`;
+  desc.style.color = 'rgba(255,255,255,0.6)';
+  desc.style.fontSize = '13px';
+  desc.style.lineHeight = '1.5';
+  desc.style.margin = '0 0 20px 0';
+  
+  const actions = document.createElement('div');
+  actions.style.display = 'flex';
+  actions.style.gap = '12px';
+  actions.style.justifyContent = 'center';
+  
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.style.padding = '8px 16px';
+  cancelBtn.style.borderRadius = '8px';
+  cancelBtn.style.border = '1px solid rgba(255,255,255,0.08)';
+  cancelBtn.style.background = 'rgba(255,255,255,0.05)';
+  cancelBtn.style.color = '#fff';
+  cancelBtn.style.cursor = 'pointer';
+  cancelBtn.style.fontSize = '13px';
+  cancelBtn.style.transition = 'background 0.2s';
+  cancelBtn.addEventListener('mouseenter', () => cancelBtn.style.background = 'rgba(255,255,255,0.1)');
+  cancelBtn.addEventListener('mouseleave', () => cancelBtn.style.background = 'rgba(255,255,255,0.05)');
+  
+  const deleteBtn = document.createElement('button');
+  deleteBtn.textContent = 'Delete';
+  deleteBtn.style.padding = '8px 16px';
+  deleteBtn.style.borderRadius = '8px';
+  deleteBtn.style.border = 'none';
+  deleteBtn.style.background = '#ff6b6b';
+  deleteBtn.style.color = '#fff';
+  deleteBtn.style.cursor = 'pointer';
+  deleteBtn.style.fontSize = '13px';
+  deleteBtn.style.transition = 'background 0.2s';
+  deleteBtn.addEventListener('mouseenter', () => deleteBtn.style.background = '#ff5252');
+  deleteBtn.addEventListener('mouseleave', () => deleteBtn.style.background = '#ff6b6b');
+  
+  const closeModal = () => {
+    modal.style.opacity = '0';
+    dialog.style.transform = 'scale(0.9)';
+    setTimeout(() => modal.remove(), 300);
+  };
+  
+  cancelBtn.addEventListener('click', closeModal);
+  deleteBtn.addEventListener('click', async () => {
+    try {
+      await invoke('delete_physical_file', { path: itemPath });
+      showToast('File deleted permanently');
+      
+      items = items.filter(it => it.path !== itemPath);
+      
+      if (items.length === 0) {
+        welcome.classList.remove('hidden');
+        sidebar.style.display = viewer.style.display = catalogGrid.style.display = 'none';
+      } else {
+        if (idx >= items.length) idx = items.length - 1;
+        buildFilmstrip();
+        if (catalogModeActive) {
+          buildCatalogContent();
+        } else {
+          show(idx);
+        }
+      }
+    } catch (e) {
+      showToast('Failed to delete file');
+    }
+    closeModal();
+  });
+  
+  actions.appendChild(cancelBtn);
+  actions.appendChild(deleteBtn);
+  dialog.appendChild(title);
+  dialog.appendChild(desc);
+  dialog.appendChild(actions);
+  modal.appendChild(dialog);
+  document.body.appendChild(modal);
+  
+  requestAnimationFrame(() => {
+    modal.style.opacity = '1';
+    dialog.style.transform = 'scale(1)';
+  });
+}
+
+function toggleCatalogView(active) {
+  catalogModeActive = active;
+  if (active) {
+    catalogGrid.style.display = 'grid';
+    sidebar.style.display = 'none';
+    viewer.style.display = 'none';
+    welcome.classList.add('hidden');
+    buildCatalogContent();
+    showToast('Catalog Grid Mode');
+  } else {
+    catalogGrid.style.display = 'none';
+    sidebar.style.display = 'flex';
+    viewer.style.display = 'block';
+    buildFilmstrip();
+    show(idx);
+  }
+}
+
+async function buildCatalogContent() {
+  catalogContent.innerHTML = '';
+  if (!items || items.length === 0) return;
+  
+  catalogTitle.textContent = '';
+  
+  items.forEach((it, i) => {
+    const card = document.createElement('div');
+    card.className = 'catalog-card';
+    card.dataset.path = it.path;
+    
+    if (selectedCatalogPaths.has(it.path)) {
+      card.classList.add('selected');
+    }
+    
+    if (duplicateGroupsCache && duplicateGroupsCache.has(it.path)) {
+      const color = duplicateGroupsCache.get(it.path);
+      card.style.borderColor = color;
+      card.style.boxShadow = `0 0 0 3px ${color}`;
+    }
+    
+    const checkOverlay = document.createElement('div');
+    checkOverlay.className = 'card-select-checkbox';
+    checkOverlay.innerHTML = '✓';
+    checkOverlay.onclick = (e) => {
+      e.stopPropagation();
+      if (selectedCatalogPaths.has(it.path)) {
+        selectedCatalogPaths.delete(it.path);
+        card.classList.remove('selected');
+      } else {
+        selectedCatalogPaths.add(it.path);
+        card.classList.add('selected');
+      }
+      updateTranscodeHud();
+    };
+    card.appendChild(checkOverlay);
+    
+    card.onclick = (e) => {
+      if (e.shiftKey || e.metaKey || e.ctrlKey) {
+        checkOverlay.click();
+        return;
+      }
+      idx = i;
+      toggleCatalogView(false);
+    };
+    
+    card.oncontextmenu = (e) => {
+      showContextMenu(e, it.path, i);
+    };
+    
+    if (it.is_video) {
+      const v = document.createElement('video');
+      v.muted = true;
+      v.loop = true;
+      v.playsInline = true;
+      card.appendChild(v);
+      
+      card.addEventListener('mouseenter', () => {
+        if (!v.src) v.src = `folio://localhost/${encodeURIComponent(it.path)}`;
+        v.play().catch(()=>{});
+      });
+      card.addEventListener('mouseleave', () => {
+        v.pause();
+      });
+    } else {
+      const img = document.createElement('img');
+      img.crossOrigin = "anonymous";
+      img.onload = () => img.classList.add('loaded');
+      card.appendChild(img);
+      
+      invoke('get_thumbnail', { path: it.path, maxSide: 320 })
+        .then(tp => {
+          img.src = `folio://localhost/${encodeURIComponent(tp)}`;
+        })
+        .catch(() => {
+          img.src = `folio://localhost/${encodeURIComponent(it.path)}`;
+        });
+    }
+    
+    const info = document.createElement('div');
+    info.className = 'catalog-card-info';
+    
+    const title = document.createElement('div');
+    title.className = 'catalog-card-title';
+    title.textContent = it.path.split('/').pop();
+    
+    info.appendChild(title);
+    card.appendChild(info);
+    catalogContent.appendChild(card);
+  });
+}
+
+function showNewFolderModal() {
+  if (!items || items.length === 0) {
+    showToast('Open a folder first');
+    return;
+  }
+  
+  const activeImagePath = items[0].path;
+  const parentPath = activeImagePath.substring(0, activeImagePath.lastIndexOf('/'));
+  
+  let modal = document.createElement('div');
+  modal.className = 'glassmorphic-modal-overlay';
+  modal.style.position = 'fixed';
+  modal.style.top = '0';
+  modal.style.left = '0';
+  modal.style.width = '100vw';
+  modal.style.height = '100vh';
+  modal.style.background = 'rgba(0,0,0,0.5)';
+  modal.style.backdropFilter = 'blur(10px)';
+  modal.style.zIndex = '999999';
+  modal.style.display = 'flex';
+  modal.style.alignItems = 'center';
+  modal.style.justifyContent = 'center';
+  modal.style.opacity = '0';
+  modal.style.transition = 'opacity 0.3s ease';
+  
+  const dialog = document.createElement('div');
+  dialog.className = 'glassmorphic-dialog';
+  dialog.style.background = 'rgba(24, 24, 28, 0.85)';
+  dialog.style.border = '1px solid rgba(255,255,255,0.08)';
+  dialog.style.padding = '24px';
+  dialog.style.borderRadius = '16px';
+  dialog.style.boxShadow = '0 30px 60px rgba(0,0,0,0.7)';
+  dialog.style.maxWidth = '360px';
+  dialog.style.width = '90%';
+  dialog.style.textAlign = 'center';
+  dialog.style.transform = 'scale(0.9)';
+  dialog.style.transition = 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)';
+  
+  const title = document.createElement('h3');
+  title.textContent = 'Create New Folder';
+  title.style.color = '#fff';
+  title.style.fontSize = '17px';
+  title.style.margin = '0 0 10px 0';
+  
+  const desc = document.createElement('p');
+  desc.textContent = `Create a new directory inside "${parentPath.split('/').pop()}":`;
+  desc.style.color = 'rgba(255,255,255,0.6)';
+  desc.style.fontSize = '12px';
+  desc.style.lineHeight = '1.5';
+  desc.style.margin = '0 0 16px 0';
+  
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = 'Folder Name';
+  input.className = 'ed-inline-input';
+  input.style.width = '100%';
+  input.style.padding = '10px 14px';
+  input.style.border = '1px solid rgba(255,255,255,0.1)';
+  input.style.borderRadius = '8px';
+  input.style.background = 'rgba(255,255,255,0.05)';
+  input.style.color = '#fff';
+  input.style.fontSize = '13px';
+  input.style.outline = 'none';
+  input.style.margin = '0 0 20px 0';
+  
+  const actions = document.createElement('div');
+  actions.style.display = 'flex';
+  actions.style.gap = '12px';
+  actions.style.justifyContent = 'center';
+  
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.style.padding = '8px 16px';
+  cancelBtn.style.borderRadius = '8px';
+  cancelBtn.style.border = '1px solid rgba(255,255,255,0.08)';
+  cancelBtn.style.background = 'rgba(255,255,255,0.05)';
+  cancelBtn.style.color = '#fff';
+  cancelBtn.style.cursor = 'pointer';
+  cancelBtn.style.fontSize = '13px';
+  
+  const createBtn = document.createElement('button');
+  createBtn.textContent = 'Create';
+  createBtn.style.padding = '8px 16px';
+  createBtn.style.borderRadius = '8px';
+  createBtn.style.border = 'none';
+  createBtn.style.background = 'var(--accent-gold, #d4a72c)';
+  createBtn.style.color = '#000';
+  createBtn.style.fontWeight = '600';
+  createBtn.style.cursor = 'pointer';
+  createBtn.style.fontSize = '13px';
+  
+  const closeModal = () => {
+    modal.style.opacity = '0';
+    dialog.style.transform = 'scale(0.9)';
+    setTimeout(() => modal.remove(), 300);
+  };
+  
+  cancelBtn.addEventListener('click', closeModal);
+  createBtn.addEventListener('click', async () => {
+    const val = input.value.trim();
+    if (!val) {
+      showToast('Enter folder name');
+      return;
+    }
+    try {
+      await invoke('create_physical_folder', { parentPath, folderName: val });
+      showToast(`Folder "${val}" created`);
+      closeModal();
+    } catch (e) {
+      showToast('Failed to create folder');
+    }
+  });
+  
+  actions.appendChild(cancelBtn);
+  actions.appendChild(createBtn);
+  dialog.appendChild(title);
+  dialog.appendChild(desc);
+  dialog.appendChild(input);
+  dialog.appendChild(actions);
+  modal.appendChild(dialog);
+  document.body.appendChild(modal);
+  
+  requestAnimationFrame(() => {
+    modal.style.opacity = '1';
+    dialog.style.transform = 'scale(1)';
+    input.focus();
+  });
+}
+
+let folderTagsCache = new Map();
+
+async function renderTagFilters() {
+  if (!items || items.length === 0) {
+    tagFilterPanel.style.display = 'none';
+    return;
+  }
+  
+  try {
+    const summary = await invoke('get_folder_tags_summary');
+    folderTagsCache.clear();
+    
+    const tagCounts = {};
+    const tagColors = {};
+    
+    summary.forEach(([imgPath, tagName, tagColor]) => {
+      const exists = items.some(it => it.path === imgPath);
+      if (exists) {
+        tagCounts[tagName] = (tagCounts[tagName] || 0) + 1;
+        tagColors[tagName] = tagColor;
+        
+        if (!folderTagsCache.has(imgPath)) {
+          folderTagsCache.set(imgPath, []);
+        }
+        folderTagsCache.get(imgPath).push({ name: tagName, color: tagColor });
+      }
+    });
+    
+    const uniqueTags = Object.keys(tagCounts);
+    if (uniqueTags.length === 0) {
+      tagFilterPanel.style.display = 'none';
+      return;
+    }
+    
+    tagFilterPanel.style.display = 'block';
+    tagFilterList.innerHTML = '';
+    
+    const allChip = document.createElement('div');
+    allChip.className = `tag-filter-chip ${activeTagFilter === null ? 'active' : ''}`;
+    
+    const allDot = document.createElement('div');
+    allDot.style.cssText = 'width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,0.5);';
+    allChip.appendChild(allDot);
+    
+    const allLabel = document.createElement('span');
+    allLabel.textContent = 'All';
+    allChip.appendChild(allLabel);
+    
+    const allCount = document.createElement('span');
+    allCount.className = 'tag-filter-count';
+    allCount.textContent = items.length;
+    allChip.appendChild(allCount);
+    
+    allChip.onclick = () => {
+      activeTagFilter = null;
+      applyTagFilter();
+      renderTagFilters();
+    };
+    tagFilterList.appendChild(allChip);
+    
+    uniqueTags.forEach(tagName => {
+      const chip = document.createElement('div');
+      chip.className = `tag-filter-chip ${activeTagFilter === tagName ? 'active' : ''}`;
+      
+      const dot = document.createElement('div');
+      dot.style.width = '6px';
+      dot.style.height = '6px';
+      dot.style.borderRadius = '50%';
+      dot.style.background = tagColors[tagName];
+      
+      const label = document.createElement('span');
+      label.textContent = tagName;
+      
+      const count = document.createElement('span');
+      count.className = 'tag-filter-count';
+      count.textContent = tagCounts[tagName];
+      
+      chip.appendChild(dot);
+      chip.appendChild(label);
+      chip.appendChild(count);
+      
+      chip.onclick = () => {
+        if (activeTagFilter === tagName) {
+          activeTagFilter = null;
+        } else {
+          activeTagFilter = tagName;
+        }
+        applyTagFilter();
+        renderTagFilters();
+      };
+      tagFilterList.appendChild(chip);
+    });
+  } catch (e) {
+    console.error('Failed to render tag filters:', e);
+  }
+}
+
+function applyTagFilter() {
+  document.querySelectorAll('.thumb').forEach(thumb => {
+    const path = thumb.dataset.path;
+    if (activeTagFilter === null) {
+      thumb.classList.remove('hidden-by-filter');
+    } else {
+      const tags = folderTagsCache.get(path) || [];
+      const matches = tags.some(t => t.name === activeTagFilter);
+      thumb.classList.toggle('hidden-by-filter', !matches);
+    }
+  });
+  
+  document.querySelectorAll('.catalog-card').forEach(card => {
+    const path = card.dataset.path;
+    if (activeTagFilter === null) {
+      card.classList.remove('hidden-by-filter');
+    } else {
+      const tags = folderTagsCache.get(path) || [];
+      const matches = tags.some(t => t.name === activeTagFilter);
+      card.classList.toggle('hidden-by-filter', !matches);
+    }
+  });
+  
+  if (items && items.length > 0) {
+    if (activeTagFilter === null) {
+      // Switching back to "All" — reset to first image
+      idx = 0;
+      if (!catalogModeActive) {
+        show(idx);
+      }
+    } else {
+      // Switching to a specific tag — jump to first matching image
+      const currentPath = items[idx]?.path;
+      const currentTags = folderTagsCache.get(currentPath) || [];
+      const isCurrentMatches = currentTags.some(t => t.name === activeTagFilter);
+      if (!isCurrentMatches) {
+        let foundIdx = items.findIndex(it => {
+          const tags = folderTagsCache.get(it.path) || [];
+          return tags.some(t => t.name === activeTagFilter);
+        });
+        if (foundIdx !== -1) {
+          idx = foundIdx;
+          if (!catalogModeActive) {
+            show(idx);
+          }
+        }
+      }
+    }
+  }
 }
 
 function showTagPill() {
@@ -1663,6 +2685,8 @@ function showTagPill() {
           
           await invoke('add_tag_to_image', { path: item.path, tagName, tagColor: chosenColor });
           showToast(`Tagged as "${tagName}"`);
+          await renderTagFilters();
+          applyTagFilter();
           
           const activeThumb = document.querySelector(`.thumb.active`);
           if (activeThumb) {
@@ -1694,3 +2718,180 @@ function showTagPill() {
   };
   document.addEventListener('mousedown', clickOutside);
 }
+
+// Real-time filesystem hot-watching update listener
+listen('fs-change', async () => {
+  if (!items || items.length === 0) return;
+  try {
+    const oldPath = items[idx]?.path;
+    items = await invoke('get_folder_items');
+    sortItems();
+    
+    if (items.length === 0) {
+      welcome.classList.remove('hidden');
+      sidebar.style.display = viewer.style.display = 'none';
+      return;
+    }
+    
+    if (oldPath) {
+      const newIdx = items.findIndex(it => it.path === oldPath);
+      if (newIdx !== -1) {
+        idx = newIdx;
+      } else {
+        if (idx >= items.length) idx = Math.max(0, items.length - 1);
+      }
+    } else {
+      if (idx >= items.length) idx = Math.max(0, items.length - 1);
+    }
+    
+    await renderTagFilters();
+    buildFilmstrip();
+    applyTagFilter();
+    if (catalogModeActive) {
+      buildCatalogContent();
+    } else {
+      show(idx);
+    }
+  } catch (e) {
+    console.error('Failed to reload on filesystem watcher update:', e);
+  }
+});
+
+// Frosted MapKit GPS Modal Functions
+function showMapPopup(lat, lon) {
+  const iframeSrc = `https://www.openstreetmap.org/export/embed.html?bbox=${lon - 0.01}%2C${lat - 0.01}%2C${lon + 0.01}%2C${lat + 0.01}&layer=mapnik&marker=${lat}%2C${lon}`;
+  mapIframe.src = iframeSrc;
+  mapModal.style.display = 'flex';
+}
+
+mapCloseBtn.onclick = () => {
+  mapModal.style.display = 'none';
+  mapIframe.src = '';
+};
+
+// Before/After Compare Slider Functions
+let compareBarCleanup = null;
+
+function toggleCompareMode(active) {
+  compareModeActive = active;
+  if (compareBtn) compareBtn.classList.toggle('active', active);
+  
+  const layer = media.querySelector('.media-layer.media-active');
+  if (!layer) return;
+  
+  const oldBar = layer.querySelector('.compare-slider-bar');
+  if (oldBar) oldBar.remove();
+  if (compareBarCleanup) {
+    compareBarCleanup();
+    compareBarCleanup = null;
+  }
+  
+  if (active) {
+    if (!editPreviewImg) {
+      const currentEdit = getCurrentEdit();
+      applyEditPreview(currentEdit);
+    }
+    
+    const bar = document.createElement('div');
+    bar.className = 'compare-slider-bar';
+    bar.innerHTML = `<div class="compare-handle">↔</div>`;
+    layer.appendChild(bar);
+    
+    updateCompareClip();
+    
+    let isDragging = false;
+    
+    const onStart = (e) => {
+      isDragging = true;
+      e.preventDefault();
+    };
+    
+    const onMove = (e) => {
+      if (!isDragging) return;
+      const rect = layer.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const x = clientX - rect.left;
+      compareClipPct = Math.max(0, Math.min(100, (x / rect.width) * 100));
+      updateCompareClip();
+    };
+    
+    const onEnd = () => {
+      isDragging = false;
+    };
+    
+    bar.addEventListener('mousedown', onStart);
+    bar.addEventListener('touchstart', onStart);
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('touchmove', onMove);
+    document.addEventListener('mouseup', onEnd);
+    document.addEventListener('touchend', onEnd);
+    
+    compareBarCleanup = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('mouseup', onEnd);
+      document.removeEventListener('touchend', onEnd);
+    };
+  } else {
+    if (editPreviewImg) {
+      editPreviewImg.style.clipPath = 'none';
+      editPreviewImg.style.webkitClipPath = 'none';
+    }
+  }
+}
+
+function updateCompareClip() {
+  const layer = media.querySelector('.media-layer.media-active');
+  if (!layer) return;
+  
+  layer.style.setProperty('--clip-pct', `${compareClipPct}%`);
+  
+  if (editPreviewImg) {
+    editPreviewImg.style.clipPath = `inset(0 0 0 ${compareClipPct}%)`;
+    editPreviewImg.style.webkitClipPath = `inset(0 0 0 ${compareClipPct}%)`;
+  }
+}
+
+compareBtn?.addEventListener('click', () => {
+  toggleCompareMode(!compareModeActive);
+});
+
+// Format Transcoder HUD Functions
+function updateTranscodeHud() {
+  const count = selectedCatalogPaths.size;
+  if (count > 0) {
+    if (transcodeCount) transcodeCount.textContent = `${count} item${count !== 1 ? 's' : ''} selected`;
+    if (transcodeHud) transcodeHud.classList.add('visible');
+  } else {
+    if (transcodeHud) transcodeHud.classList.remove('visible');
+  }
+}
+
+transcodeClose?.addEventListener('click', () => {
+  selectedCatalogPaths.clear();
+  buildCatalogContent();
+  updateTranscodeHud();
+});
+
+document.querySelectorAll('.transcode-btn[data-fmt]').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const fmt = btn.dataset.fmt;
+    const count = selectedCatalogPaths.size;
+    if (count === 0) return;
+    
+    const paths = Array.from(selectedCatalogPaths);
+    
+    selectedCatalogPaths.clear();
+    buildCatalogContent();
+    updateTranscodeHud();
+    
+    showToast(`Started transcoding ${count} item(s) to ${fmt.toUpperCase()}...`);
+    
+    try {
+      const msg = await invoke('batch_transcode', { paths, targetFormat: fmt });
+      showToast(msg);
+    } catch (e) {
+      showToast(`Transcode failed: ${e}`);
+    }
+  });
+});

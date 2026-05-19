@@ -1,6 +1,6 @@
 [package]
 name = "folio"
-version = "1.2.0"
+version = "1.3.0"
 description = "A Phiewer clone"
 authors = ["you"]
 edition = "2024"
@@ -18,12 +18,14 @@ dirs = { workspace = true }
 library-core = { path = "../crates/library-core" }
 media-core = { path = "../crates/media-core" }
 anyhow = { workspace = true }
-image = { workspace = true }
+image = { workspace = true, features = ["webp"] }
 parking_lot = { workspace = true }
 urlencoding = "2.1"
 mime_guess = "2.0"
 rfd = "0.15"
 blake3 = { workspace = true }
+notify = "8.2.0"
+tokio = { version = "1.52.3", features = ["rt", "macros"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 tauri-plugin-macos-fps = "0.1.0"
