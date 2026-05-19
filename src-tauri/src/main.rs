@@ -42,6 +42,8 @@ struct AppState {
     preview_cache: RwLock<HashMap<String, image::DynamicImage>>,
     /// List of recently opened folder paths
     recent_folders: RwLock<Vec<String>>,
+    /// In-memory cache of already resolved thumbnail paths: key is (path_string, max_side), value is thumb_path_string
+    resolved_thumbs: RwLock<HashMap<(String, u32), String>>,
 }
 
 #[tauri::command]
@@ -105,7 +107,15 @@ async fn open_folder_picker(state: State<'_, Arc<AppState>>) -> Result<Option<St
     let path_str = tauri::async_runtime::spawn_blocking(move || {
         let index = build_index(&folder_path, &state_arc.cache).map_err(|e| e.to_string())?;
         let path_str = folder_path.to_string_lossy().to_string();
-        *state_arc.index.write() = Some(index);
+        *state_arc.index.write() = Some(index.clone());
+
+        // Spawn background thread to pre-warm thumbnails in parallel
+        let state_clone = state_arc.clone();
+        let paths: Vec<PathBuf> = index.items.iter().map(|item| item.path.clone()).collect();
+        std::thread::spawn(move || {
+            state_clone.cache.warm_thumbnails(&paths, 320);
+        });
+
         Ok::<String, String>(path_str)
     })
     .await
@@ -120,7 +130,15 @@ async fn open_specific_folder(path: String, state: State<'_, Arc<AppState>>) -> 
     let path_str = tauri::async_runtime::spawn_blocking(move || {
         let index = build_index(&folder_path, &state_arc.cache).map_err(|e| e.to_string())?;
         let path_str = folder_path.to_string_lossy().to_string();
-        *state_arc.index.write() = Some(index);
+        *state_arc.index.write() = Some(index.clone());
+
+        // Spawn background thread to pre-warm thumbnails in parallel
+        let state_clone = state_arc.clone();
+        let paths: Vec<PathBuf> = index.items.iter().map(|item| item.path.clone()).collect();
+        std::thread::spawn(move || {
+            state_clone.cache.warm_thumbnails(&paths, 320);
+        });
+
         Ok::<String, String>(path_str)
     })
     .await
@@ -172,14 +190,30 @@ async fn get_folder_items(state: State<'_, Arc<AppState>>) -> Result<Vec<UiItem>
 
 #[tauri::command]
 async fn get_thumbnail(path: String, max_side: u32, state: State<'_, Arc<AppState>>) -> Result<String, String> {
+    // Check in-memory resolved_thumbs cache first
+    {
+        let cache_key = (path.clone(), max_side);
+        if let Some(cached_path) = state.resolved_thumbs.read().get(&cache_key) {
+            return Ok(cached_path.clone());
+        }
+    }
+
     let state_arc = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let path = PathBuf::from(path);
-        let thumb_path = state_arc.cache.ensure_thumbnail(&path, max_side).map_err(|e| e.to_string())?;
-        Ok::<String, String>(thumb_path.to_string_lossy().to_string())
+    let path_clone = path.clone();
+    let thumb_path = tauri::async_runtime::spawn_blocking(move || {
+        let path_buf = PathBuf::from(&path_clone);
+        let thumb_path = state_arc.cache.ensure_thumbnail(&path_buf, max_side).map_err(|e| e.to_string())?;
+        let thumb_str = thumb_path.to_string_lossy().to_string();
+        
+        // Populate in-memory cache
+        state_arc.resolved_thumbs.write().insert((path_clone, max_side), thumb_str.clone());
+        
+        Ok::<String, String>(thumb_str)
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())??;
+
+    Ok(thumb_path)
 }
 
 #[tauri::command]
@@ -203,28 +237,44 @@ async fn prepare_edit_preview(path: String, state: State<'_, Arc<AppState>>) -> 
             return Ok(());
         }
 
-        let source = {
-            let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-            let native = matches!(ext.as_str(), "jpg"|"jpeg"|"png"|"webp"|"gif"|"bmp");
-            if native {
-                p.clone()
-            } else {
-                state_arc.cache.ensure_decoded(&p).map_err(|e| e.to_string())?
+        // On macOS, if sips is supported, generate a 1024px temp JPEG downscaled preview
+        // which avoids decoding the full high-resolution image in Rust.
+        let img = if media_core::can_use_sips(&p) {
+            let temp_preview = std::env::temp_dir().join(format!(
+                "folio_preview_{}.jpg",
+                blake3::hash(path.as_bytes()).to_hex()
+            ));
+            
+            // Generate 1024px preview using sips
+            media_core::sips_output_to_file(&p, &temp_preview, Some(1024), "jpeg")
+                .map_err(|e| e.to_string())?;
+            
+            image::open(&temp_preview).map_err(|e| e.to_string())?
+        } else {
+            let source = {
+                let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+                let native = matches!(ext.as_str(), "jpg"|"jpeg"|"png"|"webp"|"gif"|"bmp");
+                if native {
+                    p.clone()
+                } else {
+                    state_arc.cache.ensure_decoded(&p).map_err(|e| e.to_string())?
+                }
+            };
+
+            let mut img = media_core::open_image(&source).map_err(|e| e.to_string())?;
+            img = media_core::apply_exif_orientation(&img, &p);
+
+            let (w, h) = img.dimensions();
+            let max_side = 1024;
+            let longest = w.max(h);
+            if longest > max_side {
+                let scale = max_side as f32 / longest as f32;
+                let nw = (w as f32 * scale).round() as u32;
+                let nh = (h as f32 * scale).round() as u32;
+                img = img.resize(nw, nh, image::imageops::FilterType::Triangle);
             }
+            img
         };
-
-        let mut img = media_core::open_image(&source).map_err(|e| e.to_string())?;
-        img = media_core::apply_exif_orientation(&img, &p);
-
-        let (w, h) = img.dimensions();
-        let max_side = 1024;
-        let longest = w.max(h);
-        if longest > max_side {
-            let scale = max_side as f32 / longest as f32;
-            let nw = (w as f32 * scale).round() as u32;
-            let nh = (h as f32 * scale).round() as u32;
-            img = img.resize(nw, nh, image::imageops::FilterType::Triangle);
-        }
 
         state_arc.preview_cache.write().insert(path, img);
         Ok::<(), String>(())
@@ -323,6 +373,7 @@ fn main() {
         edits: RwLock::new(HashMap::new()),
         preview_cache: RwLock::new(HashMap::new()),
         recent_folders: RwLock::new(Vec::new()),
+        resolved_thumbs: RwLock::new(HashMap::new()),
     });
 
     let mut builder = tauri::Builder::default()

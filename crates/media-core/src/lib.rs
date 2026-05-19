@@ -123,6 +123,21 @@ pub fn needs_sips_decode(path: &Path) -> bool {
     !image_crate_native(&ext) || ext == "tif" || ext == "tiff"
 }
 
+pub fn can_use_sips(path: &Path) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let ext = path.extension()
+            .and_then(std::ffi::OsStr::to_str)
+            .map(str::to_ascii_lowercase)
+            .unwrap_or_default();
+        ext != "webp" && ext != "gif" && is_supported_image_path(path)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
 /// Resize any image via macOS `sips` directly to a file. 
 /// Used for high-performance thumbnailing and full-size decoding.
 #[cfg(target_os = "macos")]

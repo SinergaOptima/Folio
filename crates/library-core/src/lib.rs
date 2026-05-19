@@ -5,6 +5,7 @@ use std::time::UNIX_EPOCH;
 use anyhow::{Context, Result};
 use media_core::{ImageMetadata, decode_image, is_video_path, read_metadata, scan_supported_images};
 use rusqlite::{Connection, OptionalExtension, params};
+use rayon::prelude::*;
 
 #[derive(Debug, Clone)]
 pub struct LibraryItem {
@@ -32,23 +33,31 @@ impl LibraryIndex {
 /// Build index — skips files that fail metadata reads instead of aborting
 pub fn build_index(root: &Path, cache: &LibraryCache) -> Result<LibraryIndex> {
     let paths = scan_supported_images(root)?;
-    let mut items = Vec::with_capacity(paths.len());
-    for path in paths {
-        let metadata = match cache.cached_metadata(&path) {
-            Ok(Some(metadata)) => metadata,
-            _ => {
-                match read_metadata(&path) {
-                    Ok(metadata) => {
-                        let _ = cache.upsert_metadata(&path, &metadata);
-                        metadata
+    
+    let items: Vec<LibraryItem> = paths
+        .par_iter()
+        .filter_map(|path| {
+            let metadata = match cache.cached_metadata(path) {
+                Ok(Some(metadata)) => Some(metadata),
+                _ => {
+                    match read_metadata(path) {
+                        Ok(metadata) => {
+                            let _ = cache.upsert_metadata(path, &metadata);
+                            Some(metadata)
+                        }
+                        Err(_) => None, // Skip files that fail
                     }
-                    Err(_) => continue, // Skip files that fail
                 }
-            }
-        };
-        let video = is_video_path(&path);
-        items.push(LibraryItem { path, metadata, is_video: video });
-    }
+            }?;
+            let video = is_video_path(path);
+            Some(LibraryItem {
+                path: path.clone(),
+                metadata,
+                is_video: video,
+            })
+        })
+        .collect();
+
     Ok(LibraryIndex {
         root: root.to_path_buf(),
         items,
@@ -221,7 +230,7 @@ impl LibraryCache {
 
     pub fn thumbnail_path(&self, path: &Path, max_side: u32) -> Result<PathBuf> {
         let fingerprint = image_fingerprint(path)?;
-        Ok(self.thumb_dir.join(format!("{fingerprint}_{max_side}.png")))
+        Ok(self.thumb_dir.join(format!("{fingerprint}_{max_side}.jpg")))
     }
 
     pub fn ensure_thumbnail(&self, path: &Path, max_side: u32) -> Result<PathBuf> {
@@ -236,18 +245,21 @@ impl LibraryCache {
         }
         let tmp_path = thumb_path.with_extension("tmp");
 
-        if media_core::needs_sips_decode(path) {
+        if media_core::can_use_sips(path) {
             // High-performance native thumbnailing
-            media_core::sips_output_to_file(path, &tmp_path, Some(max_side), "png")
+            media_core::sips_output_to_file(path, &tmp_path, Some(max_side), "jpeg")
                 .with_context(|| format!("native sips thumbnail failed for {}", path.display()))?;
         } else {
             let decoded = decode_image(path, Some(max_side))
                 .with_context(|| format!("failed to decode thumbnail input {}", path.display()))?;
             let rgba = image::RgbaImage::from_raw(decoded.width, decoded.height, decoded.rgba)
                 .context("failed to construct RGBA thumbnail image")?;
+            let mut file = std::fs::File::create(&tmp_path)
+                .with_context(|| format!("failed to create temp thumbnail file: {}", tmp_path.display()))?;
+            let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut file, 85);
             image::DynamicImage::ImageRgba8(rgba)
-                .save(&tmp_path)
-                .with_context(|| format!("failed to save thumbnail {}", tmp_path.display()))?;
+                .write_with_encoder(encoder)
+                .with_context(|| format!("failed to write JPEG thumbnail {}", tmp_path.display()))?;
         }
 
         std::fs::rename(&tmp_path, &thumb_path)
@@ -289,9 +301,9 @@ impl LibraryCache {
     }
 
     pub fn warm_thumbnails(&self, paths: &[PathBuf], max_side: u32) {
-        for path in paths {
+        paths.par_iter().for_each(|path| {
             let _ = self.ensure_thumbnail(path, max_side);
-        }
+        });
     }
 }
 

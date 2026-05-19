@@ -533,6 +533,55 @@ function applyPhysicalExit(node, dir) {
   ], { duration: 700, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards' }).finished.then(() => node.remove());
 }
 
+function preloadImage(item) {
+  if (!item || item.is_video) return;
+  if (preloadCache.has(item.path)) return;
+
+  const ext = (item.path.split('.').pop() || '').toLowerCase();
+  const isNative = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'].includes(ext);
+
+  const img = new Image();
+  preloadCache.set(item.path, img);
+
+  if (isNative) {
+    img.src = `folio://localhost/${encodeURIComponent(item.path)}`;
+  } else {
+    invoke('get_full_image', { path: item.path })
+      .then(p => {
+        img.src = `folio://localhost/${encodeURIComponent(p)}`;
+      })
+      .catch(e => {
+        preloadCache.delete(item.path);
+        console.error('RAW preload failed:', e);
+      });
+  }
+}
+
+function triggerPreload(currentIdx) {
+  if (!items || items.length <= 1) return;
+
+  const keepSet = new Set();
+  const windowSize = 2; // Keep 2 adjacent in each direction
+  
+  for (let offset = -windowSize; offset <= windowSize; offset++) {
+    const targetIdx = (currentIdx + offset + items.length) % items.length;
+    const item = items[targetIdx];
+    if (item && !item.is_video) {
+      keepSet.add(item.path);
+      if (offset !== 0) {
+        preloadImage(item);
+      }
+    }
+  }
+
+  // Evict items from preloadCache that are not in our sliding keep window
+  for (const path of preloadCache.keys()) {
+    if (!keepSet.has(path)) {
+      preloadCache.delete(path);
+    }
+  }
+}
+
 function show(i, dir = null) {
   const prevIdx = idx, direction = dir !== null ? dir : (i > prevIdx ? 1 : i < prevIdx ? -1 : 0);
   idx = i; zoom = 1; panX = 0; panY = 0;
@@ -591,12 +640,19 @@ function show(i, dir = null) {
     img.onload = onImgReady;
     img.onerror = onImgReady;
 
-    if (!['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'].includes(item.path.split('.').pop().toLowerCase())) {
-        invoke('get_full_image', { path: item.path }).then(p => { img.src = `folio://localhost/${encodeURIComponent(p)}`; }).catch(() => { img.src = src; });
+    const cached = preloadCache.get(item.path);
+    if (cached && cached.complete && cached.naturalWidth > 0) {
+        img.src = cached.src;
+        onImgReady();
     } else {
-        const cached = preloadCache.get(item.path);
-        if (cached && cached.complete && cached.naturalWidth > 0) { img.src = cached.src; onImgReady(); }
-        else { img.src = src; }
+        const isNative = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'].includes(item.path.split('.').pop().toLowerCase());
+        if (isNative) {
+            img.src = src;
+        } else {
+            invoke('get_full_image', { path: item.path })
+                .then(p => { img.src = `folio://localhost/${encodeURIComponent(p)}`; })
+                .catch(() => { img.src = src; });
+        }
     }
     layer.appendChild(img);
     media.appendChild(layer);
@@ -626,6 +682,7 @@ function show(i, dir = null) {
   
   highlightThumb();
   removeEditPreview();
+  triggerPreload(i);
 }
 
 function updateAdaptiveGlow(el) {
