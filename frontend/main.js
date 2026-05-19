@@ -114,9 +114,13 @@ app.innerHTML = `
         <div class="edit-row"><label>Brightness</label><input type="range" class="edit-slider" data-param="brightness" min="-100" max="100" step="1" value="0"><span class="edit-val">0</span></div>
         <div class="edit-row"><label>Vibrance</label><input type="range" class="edit-slider" data-param="vibrance" min="-100" max="100" step="1" value="0"><span class="edit-val">0</span></div>
       </div>
-      <div class="edit-footer">
-        <button class="edit-flip-btn" id="flipHBtn">Flip Horizontal</button>
-        <button class="edit-flip-btn" id="flipVBtn">Flip Vertical</button>
+      <div class="edit-footer" style="flex-direction: column; gap: 8px;">
+        <div style="display: flex; gap: 8px; width: 100%;">
+          <button class="edit-flip-btn" id="rotateBtn" style="flex: 1;">Rotate 90°</button>
+          <button class="edit-flip-btn" id="flipHBtn" style="flex: 1;">Flip H</button>
+          <button class="edit-flip-btn" id="flipVBtn" style="flex: 1;">Flip V</button>
+        </div>
+        <button class="edit-flip-btn" id="cropBtn" style="width: 100%; border-color: rgba(212,167,44,0.35); color: var(--accent-gold);">Crop Photo</button>
       </div>
     </div>
     <button class="edit-toggle-btn" id="editToggleBtn" data-tooltip="Edit Photo (E)">Edit</button>
@@ -160,6 +164,10 @@ app.innerHTML = `
           <div class="setting-row">
             <label for="recentFoldersCheck">Show Recent Folders</label>
             <input type="checkbox" id="recentFoldersCheck" checked />
+          </div>
+          <div class="setting-row">
+            <label for="stripMetadataCheck">Scrub EXIF Metadata on Export</label>
+            <input type="checkbox" id="stripMetadataCheck" checked />
           </div>
         </div>
         <div class="tab-pane" id="tab-appearance">
@@ -235,7 +243,7 @@ app.innerHTML = `
 
 /* ── DOM REFS ── */
 const $ = id => document.getElementById(id);
-const welcome = $('welcome'), welcomeBg = $('welcomeBg'), sidebar = $('sidebar'), sidebarResizer = $('sidebarResizer'), sidebarToggle = $('sidebarToggle'), viewer = $('viewer'), media = $('media'), mediaLoader = $('mediaLoader'), filmstrip = $('filmstrip'), breadcrumbs = $('breadcrumbs'), gridToggleBtn = $('gridToggleBtn'), counter = $('counter'), fname = $('fname'), dims = $('dims'), badge = $('badge'), edOverlay = $('editorialOverlay'), edCamera = $('edCamera'), edAperture = $('edAperture'), edShutter = $('edShutter'), edIso = $('edIso'), edFocal = $('edFocal'), edTechData = $('edTechData'), backdropGlow = $('backdropGlow'), editPanel = $('editPanel'), editToggleBtn = $('editToggleBtn'), editCloseBtn = $('editCloseBtn'), editResetBtn = $('editResetBtn'), editExportBtn = $('editExportBtn'), flipHBtn = $('flipHBtn'), flipVBtn = $('flipVBtn'), customCursor = $('customCursor'), customCursorCheck = $('customCursorCheck'), dropzoneGlow = $('dropzoneGlow'), zoomSlider = $('zoomSlider'), zoomLabel = $('zoomLabel'), zoomReset = $('zoomReset'), fullscreenBtn = $('fullscreenBtn'), imageFsExit = $('imageFsExit'), sortSelect = $('sortSelect'), zoomSensSlider = $('zoomSensSlider'), themeSelect = $('themeSelect'), cinematicCheck = $('cinematicCheck'), recentFoldersCheck = $('recentFoldersCheck'), vibrancyCheck = $('vibrancyCheck');
+const welcome = $('welcome'), welcomeBg = $('welcomeBg'), sidebar = $('sidebar'), sidebarResizer = $('sidebarResizer'), sidebarToggle = $('sidebarToggle'), viewer = $('viewer'), media = $('media'), mediaLoader = $('mediaLoader'), filmstrip = $('filmstrip'), breadcrumbs = $('breadcrumbs'), gridToggleBtn = $('gridToggleBtn'), counter = $('counter'), fname = $('fname'), dims = $('dims'), badge = $('badge'), edOverlay = $('editorialOverlay'), edCamera = $('edCamera'), edAperture = $('edAperture'), edShutter = $('edShutter'), edIso = $('edIso'), edFocal = $('edFocal'), edTechData = $('edTechData'), backdropGlow = $('backdropGlow'), editPanel = $('editPanel'), editToggleBtn = $('editToggleBtn'), editCloseBtn = $('editCloseBtn'), editResetBtn = $('editResetBtn'), editExportBtn = $('editExportBtn'), rotateBtn = $('rotateBtn'), flipHBtn = $('flipHBtn'), flipVBtn = $('flipVBtn'), cropBtn = $('cropBtn'), customCursor = $('customCursor'), customCursorCheck = $('customCursorCheck'), dropzoneGlow = $('dropzoneGlow'), zoomSlider = $('zoomSlider'), zoomLabel = $('zoomLabel'), zoomReset = $('zoomReset'), fullscreenBtn = $('fullscreenBtn'), imageFsExit = $('imageFsExit'), sortSelect = $('sortSelect'), zoomSensSlider = $('zoomSensSlider'), themeSelect = $('themeSelect'), cinematicCheck = $('cinematicCheck'), recentFoldersCheck = $('recentFoldersCheck'), stripMetadataCheck = $('stripMetadataCheck'), vibrancyCheck = $('vibrancyCheck');
 
 /* ── Settings & State ── */
 let currentSort = localStorage.getItem('folio_sort') || 'name';
@@ -244,6 +252,7 @@ let currentTheme = localStorage.getItem('folio_theme') || 'dark';
 let cinematicEnabled = localStorage.getItem('folio_cinematic') !== 'false';
 let useCustomCursor = localStorage.getItem('folio_custom_cursor') !== 'false';
 let showRecentFolders = localStorage.getItem('folio_show_recents') !== 'false';
+let stripMetadataEnabled = localStorage.getItem('folio_strip_metadata') !== 'false';
 let vibrancyEnabled = localStorage.getItem('folio_vibrancy') === 'true';
 let gridView = localStorage.getItem('folio_grid_view') === 'true';
 
@@ -267,6 +276,13 @@ if (recentFoldersCheck) {
     showRecentFolders = e.target.checked;
     localStorage.setItem('folio_show_recents', showRecentFolders);
     renderRecentFolders();
+  });
+}
+if (stripMetadataCheck) {
+  stripMetadataCheck.checked = stripMetadataEnabled;
+  stripMetadataCheck.addEventListener('change', (e) => {
+    stripMetadataEnabled = e.target.checked;
+    localStorage.setItem('folio_strip_metadata', stripMetadataEnabled);
   });
 }
 if (vibrancyCheck) {
@@ -316,17 +332,95 @@ function initTooltips() {
   window.addEventListener('mouseover', (e) => {
     const target = e.target.closest('[data-tooltip]');
     if (!target) {
-      tooltipEl.classList.remove('visible');
+      tooltipEl.classList.remove('visible', 'placement-top', 'placement-bottom');
       return;
     }
     tooltipEl.textContent = target.dataset.tooltip;
-    tooltipEl.classList.add('visible');
+    
     const r = target.getBoundingClientRect();
     tooltipEl.style.left = `${r.left + r.width/2}px`;
-    tooltipEl.style.top = `${r.top - 8}px`;
+    
+    if (r.top < 45) {
+      tooltipEl.className = 'folio-tooltip placement-bottom';
+      tooltipEl.style.top = `${r.bottom}px`;
+    } else {
+      tooltipEl.className = 'folio-tooltip placement-top';
+      tooltipEl.style.top = `${r.top}px`;
+    }
+    
+    tooltipEl.classList.add('visible');
   });
 }
 initTooltips();
+
+function makeEditable(element, fieldKey) {
+  if (!element) return;
+  element.style.cursor = 'pointer';
+  element.title = 'Double-click to edit';
+  
+  element.addEventListener('dblclick', (e) => {
+    e.stopPropagation();
+    const originalText = element.textContent;
+    if (element.querySelector('input')) return;
+    
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = originalText === '—' || originalText === 'Unknown Camera' || originalText === 'No Metadata' ? '' : originalText;
+    input.className = 'ed-inline-input';
+    
+    element.textContent = '';
+    element.appendChild(input);
+    input.focus();
+    
+    let saved = false;
+    const saveEdit = async () => {
+      if (saved) return;
+      saved = true;
+      const newVal = input.value.trim() || '—';
+      element.textContent = newVal;
+      
+      const item = items[idx];
+      if (!item) return;
+      if (!item.exif) item.exif = {};
+      
+      if (fieldKey === 'camera') item.exif.camera = newVal;
+      else if (fieldKey === 'aperture') item.exif.aperture = newVal;
+      else if (fieldKey === 'shutter') item.exif.shutter_speed = newVal;
+      else if (fieldKey === 'iso') item.exif.iso = newVal;
+      else if (fieldKey === 'focal') item.exif.focal_length = newVal;
+      
+      try {
+        await invoke('update_exif_metadata', {
+          path: item.path,
+          camera: item.exif.camera || null,
+          aperture: item.exif.aperture || null,
+          shutterSpeed: item.exif.shutter_speed || null,
+          iso: item.exif.iso || null,
+          focalLength: item.exif.focal_length || null
+        });
+        showToast('Metadata updated');
+      } catch (err) {
+        showToast('Failed to save metadata');
+        element.textContent = originalText;
+      }
+    };
+    
+    input.addEventListener('keydown', (evt) => {
+      if (evt.key === 'Enter') saveEdit();
+      if (evt.key === 'Escape') {
+        saved = true;
+        element.textContent = originalText;
+      }
+    });
+    
+    input.addEventListener('blur', saveEdit);
+  });
+}
+makeEditable(edCamera, 'camera');
+makeEditable(edAperture, 'aperture');
+makeEditable(edShutter, 'shutter');
+makeEditable(edIso, 'iso');
+makeEditable(edFocal, 'focal');
 
 let activeToasts = [];
 function showToast(message) {
@@ -334,7 +428,8 @@ function showToast(message) {
   if (!container) return;
   const toast = document.createElement('div');
   toast.className = 'toast';
-  toast.textContent = message;
+  const svgMarkup = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`;
+  toast.innerHTML = `${svgMarkup}<span>${message}</span>`;
   container.appendChild(toast);
   activeToasts.push(toast);
   
@@ -517,6 +612,7 @@ async function openFolder() {
         const p = await invoke('open_folder_picker');
         if (!p) return;
         await invoke('add_recent_folder', { path: p });
+        renderRecentFolders();
         loadFolderData(p);
     } catch (e) { console.error(e); }
 }
@@ -629,19 +725,31 @@ function show(i, dir = null) {
     media.appendChild(layer);
   } else {
     viewer.classList.add('loading'); const ts = preloadedThumbs.get(item.path);
-    if (ts) { const ph = document.createElement('img'); ph.src = ts; ph.className = 'placeholder-thumb loaded'; layer.appendChild(ph); }
-    const img = document.createElement('img'); img.alt = ''; img.className = 'media-content';
+    if (ts) { const ph = document.createElement('img'); ph.crossOrigin = "anonymous"; ph.src = ts; ph.className = 'placeholder-thumb loaded'; layer.appendChild(ph); }
+    const img = document.createElement('img'); img.crossOrigin = "anonymous"; img.alt = ''; img.className = 'media-content';
     const onImgReady = () => {
         img.classList.add('loaded');
         img.style.opacity = '1';
         viewer.classList.remove('loading');
         const ph = layer.querySelector('.placeholder-thumb');
         if (ph) ph.remove();
-        updateAdaptiveGlow(img);
+        try {
+            updateAdaptiveGlow(img);
+        } catch (e) {
+            console.error("Adaptive glow error:", e);
+        }
         if (editPanelOpen) invoke('prepare_edit_preview', { path: item.path }).then(() => loadEditForCurrent()).catch(e => console.error(e));
         if (overlayVisible) {
-            drawHistogram(img);
-            drawDominantColors(item);
+            try {
+                drawHistogram(img);
+            } catch (e) {
+                console.error("Histogram error:", e);
+            }
+            try {
+                drawDominantColors(item);
+            } catch (e) {
+                console.error("Dominant colors error:", e);
+            }
         }
     };
     img.onload = onImgReady;
@@ -688,14 +796,29 @@ function show(i, dir = null) {
   }
   
   highlightThumb();
+  closeCropMode();
   removeEditPreview();
   triggerPreload(i);
 }
 
 function updateAdaptiveGlow(el) {
-    if (!backdropGlow) return;
+  if (!backdropGlow) return;
+  try {
     const color = extractDominantColor(el);
-    backdropGlow.style.background = `radial-gradient(circle at 50% 50%, ${color} 0%, transparent 70%)`;
+    const rgb = color.match(/\d+/g);
+    if (rgb && rgb.length >= 3) {
+      const r = parseInt(rgb[0]), g = parseInt(rgb[1]), b = parseInt(rgb[2]);
+      const c1 = `rgba(${r}, ${g}, ${b}, 0.22)`;
+      const c2 = `rgba(${g}, ${b}, ${r}, 0.16)`;
+      const c3 = `rgba(${b}, ${r}, ${g}, 0.12)`;
+      
+      backdropGlow.style.setProperty('--glow-c1', c1);
+      backdropGlow.style.setProperty('--glow-c2', c2);
+      backdropGlow.style.setProperty('--glow-c3', c3);
+    }
+  } catch (e) {
+    console.error("Glow generation failed:", e);
+  }
 }
 
 /* ── Filmstrip ── */
@@ -757,16 +880,31 @@ function buildFilmstrip() {
         icon.innerHTML = '▶';
         d.appendChild(icon);
     } else {
-        const img = document.createElement('img'); d.appendChild(img);
+        const img = document.createElement('img'); img.crossOrigin = "anonymous"; d.appendChild(img);
     }
+    
+    const dotsContainer = document.createElement('div');
+    dotsContainer.className = 'thumb-tag-dots';
+    d.appendChild(dotsContainer);
+    
+    invoke('get_image_tags', { path: it.path }).then(tags => {
+      tags.forEach(t => {
+        const dot = document.createElement('div');
+        dot.className = 'thumb-tag-dot';
+        dot.style.background = t.color;
+        dot.title = t.name;
+        dotsContainer.appendChild(dot);
+      });
+    }).catch(()=>{});
+    
     filmstrip.appendChild(d); obs.observe(d);
   });
 }
 
-function highlightThumb() { document.querySelectorAll('.thumb').forEach((t, i) => { if (i === idx) { t.classList.add('active'); filmstrip.scrollTop = t.offsetTop - filmstrip.clientHeight/2 + t.clientHeight/2; } else t.classList.remove('active'); }); }
+function highlightThumb() { document.querySelectorAll('.thumb').forEach((t, i) => { if (i === idx) { t.classList.add('active'); filmstrip.scrollTo({ top: t.offsetTop - filmstrip.clientHeight/2 + t.clientHeight/2, behavior: 'smooth' }); } else t.classList.remove('active'); }); }
 
 /* ── Simple Edit Engine ── */
-const defaultEdit = () => ({ brightness: 0, vibrance: 0, flip_h: false, flip_v: false });
+const defaultEdit = () => ({ brightness: 0, vibrance: 0, flip_h: false, flip_v: false, rotate: 0 });
 function getCurrentEdit() { return editMap.get(items[idx]?.path) || defaultEdit(); }
 function setCurrentEdit(edit) { if (items[idx]?.path) { editMap.set(items[idx].path, edit); invoke('set_edit', { path: items[idx].path, edit }).catch(() => {}); } }
 
@@ -777,13 +915,199 @@ async function openEditPanel() {
   try { await invoke('prepare_edit_preview', { path }); loadEditForCurrent(); } catch (e) { console.error(e); }
 }
 
+let cropModeActive = false;
+let cropCoords = { x: 0, y: 0, w: 1, h: 1 };
+
+function closeCropMode() {
+  cropModeActive = false;
+  cropBtn?.classList.remove('active');
+  const overlay = document.getElementById('cropOverlay');
+  if (overlay) overlay.remove();
+}
+
+function initCropOverlay() {
+  const activeImg = getActiveMediaImg();
+  if (!activeImg) return;
+  
+  let overlay = document.getElementById('cropOverlay');
+  if (overlay) overlay.remove();
+  
+  overlay = document.createElement('div');
+  overlay.id = 'cropOverlay';
+  overlay.className = 'crop-overlay-container';
+  
+  for (let i = 1; i <= 2; i++) {
+    const hLine = document.createElement('div');
+    hLine.className = `crop-grid-line crop-grid-h${i}`;
+    overlay.appendChild(hLine);
+    
+    const vLine = document.createElement('div');
+    vLine.className = `crop-grid-line crop-grid-v${i}`;
+    overlay.appendChild(vLine);
+  }
+  
+  const hud = document.createElement('div');
+  hud.id = 'cropHud';
+  hud.className = 'crop-badge-hud';
+  hud.textContent = 'Crop Area';
+  overlay.appendChild(hud);
+  
+  const handles = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+  handles.forEach(h => {
+    const handle = document.createElement('div');
+    handle.className = `crop-handle crop-handle-${h}`;
+    handle.dataset.handle = h;
+    overlay.appendChild(handle);
+  });
+  
+  const layer = media.querySelector('.media-layer.media-active');
+  if (layer) {
+    layer.appendChild(overlay);
+    updateCropOverlayStyles(activeImg, overlay);
+    setupCropEvents(activeImg, overlay);
+  }
+}
+
+function getActiveMediaImg() {
+  const layer = media.querySelector('.media-layer.media-active');
+  return layer ? layer.querySelector('.media-content') : null;
+}
+
+function updateCropOverlayStyles(img, overlay) {
+  if (!img || !overlay) return;
+  const w = img.clientWidth;
+  const h = img.clientHeight;
+  
+  const left = cropCoords.x * w;
+  const top = cropCoords.y * h;
+  const width = cropCoords.w * w;
+  const height = cropCoords.h * h;
+  
+  overlay.style.left = `${img.offsetLeft + left}px`;
+  overlay.style.top = `${img.offsetTop + top}px`;
+  overlay.style.width = `${width}px`;
+  overlay.style.height = `${height}px`;
+  
+  const activeItem = items[idx];
+  if (activeItem) {
+    const realW = Math.round(cropCoords.w * activeItem.width);
+    const realH = Math.round(cropCoords.h * activeItem.height);
+    const hud = document.getElementById('cropHud');
+    if (hud) hud.textContent = `${realW} × ${realH} (${Math.round(cropCoords.w * 100)}% × ${Math.round(cropCoords.h * 100)}%)`;
+  }
+}
+
+function setupCropEvents(img, overlay) {
+  let isDraggingCrop = false;
+  let dragStart = { x: 0, y: 0 };
+  let initialCoords = { ...cropCoords };
+  let activeHandle = null;
+  
+  const onMouseDown = (e) => {
+    e.stopPropagation();
+    isDraggingCrop = true;
+    dragStart = { x: e.clientX, y: e.clientY };
+    initialCoords = { ...cropCoords };
+    
+    if (e.target.classList.contains('crop-handle')) {
+      activeHandle = e.target.dataset.handle;
+    } else {
+      activeHandle = 'move';
+    }
+    
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
+  
+  const onMouseMove = (e) => {
+    if (!isDraggingCrop) return;
+    e.preventDefault();
+    
+    const dx = e.clientX - dragStart.x;
+    const dy = e.clientY - dragStart.y;
+    
+    const w = img.clientWidth;
+    const h = img.clientHeight;
+    
+    const rdx = dx / w;
+    const rdy = dy / h;
+    
+    let nextCoords = { ...initialCoords };
+    
+    if (activeHandle === 'move') {
+      nextCoords.x = Math.max(0, Math.min(1 - initialCoords.w, initialCoords.x + rdx));
+      nextCoords.y = Math.max(0, Math.min(1 - initialCoords.h, initialCoords.y + rdy));
+    } else {
+      if (activeHandle.includes('w')) {
+        const newW = Math.max(0.05, initialCoords.w - rdx);
+        const newX = initialCoords.x + (initialCoords.w - newW);
+        if (newX >= 0) {
+          nextCoords.w = newW;
+          nextCoords.x = newX;
+        }
+      }
+      if (activeHandle.includes('e')) {
+        nextCoords.w = Math.max(0.05, Math.min(1 - initialCoords.x, initialCoords.w + rdx));
+      }
+      if (activeHandle.includes('n')) {
+        const newH = Math.max(0.05, initialCoords.h - rdy);
+        const newY = initialCoords.y + (initialCoords.h - newH);
+        if (newY >= 0) {
+          nextCoords.h = newH;
+          nextCoords.y = newY;
+        }
+      }
+      if (activeHandle.includes('s')) {
+        nextCoords.h = Math.max(0.05, Math.min(1 - initialCoords.y, initialCoords.h + rdy));
+      }
+    }
+    
+    cropCoords = nextCoords;
+    updateCropOverlayStyles(img, overlay);
+    
+    const currentEdit = getCurrentEdit();
+    currentEdit.crop_x = cropCoords.x;
+    currentEdit.crop_y = cropCoords.y;
+    currentEdit.crop_w = cropCoords.w;
+    currentEdit.crop_h = cropCoords.h;
+    setCurrentEdit(currentEdit);
+    
+    applyEditPreview(currentEdit);
+  };
+  
+  const onMouseUp = () => {
+    isDraggingCrop = false;
+    activeHandle = null;
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+  };
+  
+  overlay.addEventListener('mousedown', onMouseDown);
+}
+
 function closeEditPanel() {
-  editPanelOpen = false; editPanel.classList.remove('visible'); editPanel.setAttribute('aria-hidden', 'true'); editToggleBtn.classList.remove('active'); removeEditPreview();
+  editPanelOpen = false;
+  editPanel.classList.remove('visible');
+  editPanel.setAttribute('aria-hidden', 'true');
+  editToggleBtn.classList.remove('active');
+  closeCropMode();
+  removeEditPreview();
   requestAnimationFrame(() => { if (zoom <= 1) resetZoom(); else scheduleUpdate(); });
 }
 
 function loadEditForCurrent() {
   const e = getCurrentEdit();
+  cropCoords = {
+    x: e.crop_x ?? 0,
+    y: e.crop_y ?? 0,
+    w: e.crop_w ?? 1,
+    h: e.crop_h ?? 1
+  };
+  
+  if (cropModeActive) {
+    initCropOverlay();
+  }
+  
   document.querySelectorAll('.edit-slider').forEach(s => {
     const v = e[s.dataset.param] ?? 0; s.value = v;
     const valEl = s.closest('.edit-row')?.querySelector('.edit-val');
@@ -791,6 +1115,10 @@ function loadEditForCurrent() {
   });
   flipHBtn?.classList.toggle('active', e.flip_h);
   flipVBtn?.classList.toggle('active', e.flip_v);
+  if (rotateBtn) {
+    rotateBtn.classList.toggle('active', e.rotate !== 0);
+    rotateBtn.textContent = e.rotate !== 0 ? `Rotated ${e.rotate}°` : 'Rotate 90°';
+  }
   applyEditPreview(e);
 }
 
@@ -805,6 +1133,7 @@ async function applyEditPreview(edit) {
       const b64 = await invoke('edit_image', { path, edit });
       if (!editPreviewImg) {
         editPreviewImg = document.createElement('img');
+        editPreviewImg.crossOrigin = "anonymous";
         editPreviewImg.className = 'media-content edit-preview loaded';
         editPreviewImg.style.cssText = 'position:absolute;inset:0;margin:auto;z-index:2;width:100%;height:100%;object-fit:contain;pointer-events:none;';
         layer.appendChild(editPreviewImg);
@@ -829,6 +1158,7 @@ sidebarToggle.addEventListener('click', () => {
   const visible = sidebar.style.display !== 'none';
   sidebar.style.display = visible ? 'none' : 'flex';
   sidebarToggle.classList.toggle('active', !visible);
+  sidebarToggle.classList.toggle('sidebar-closed', visible);
   sidebarToggle.textContent = !visible ? 'Close' : 'Sidebar';
   requestAnimationFrame(() => { if (zoom > 1) scheduleUpdate(); else resetZoom(); });
 });
@@ -865,13 +1195,24 @@ editCloseBtn?.addEventListener('click', closeEditPanel);
 editResetBtn.addEventListener('click', () => { const p = items[idx]?.path; if (!p) return; editMap.set(p, defaultEdit()); loadEditForCurrent(); showToast('Edit reset'); });
 
 flipHBtn.addEventListener('click', () => { const e = getCurrentEdit(); e.flip_h = !e.flip_h; setCurrentEdit(e); loadEditForCurrent(); });
+rotateBtn.addEventListener('click', () => { const e = getCurrentEdit(); e.rotate = (e.rotate + 90) % 360; setCurrentEdit(e); loadEditForCurrent(); });
 flipVBtn.addEventListener('click', () => { const e = getCurrentEdit(); e.flip_v = !e.flip_v; setCurrentEdit(e); loadEditForCurrent(); });
+cropBtn.addEventListener('click', () => {
+  cropModeActive = !cropModeActive;
+  cropBtn.classList.toggle('active', cropModeActive);
+  if (cropModeActive) {
+    initCropOverlay();
+  } else {
+    const overlay = document.getElementById('cropOverlay');
+    if (overlay) overlay.remove();
+  }
+});
 
 editExportBtn?.addEventListener('click', async () => {
   const p = items[idx]?.path; if (!p) return;
   try {
     const dest = await save({ defaultPath: p.replace(/(\\.[^.]+)\$/, '_edited$1'), filters: [{ name: 'Image', extensions: ['jpg', 'jpeg', 'png', 'tiff'] }] });
-    if (dest) { await invoke('export_edited', { path: p, dest }); showToast('Exported successfully'); }
+    if (dest) { await invoke('export_edited', { path: p, dest, stripMetadata: stripMetadataEnabled }); showToast('Exported successfully'); }
   } catch (e) { showToast('Export failed'); }
 });
 
@@ -885,16 +1226,37 @@ document.querySelectorAll('.edit-slider').forEach(s => {
 });
 
 /* ── Global Handlers ── */
+let cursorX = 0, cursorY = 0;
+let targetX = 0, targetY = 0;
+let isHoveringCursor = false;
+
 window.addEventListener('mousemove', (e) => {
+  targetX = e.clientX;
+  targetY = e.clientY;
+  
   const inTL = !isFullscreen && e.clientX <= 80 && e.clientY <= 40;
   if (useCustomCursor) setTrafficLightHover(inTL);
-  if (!useCustomCursor || trafficLightHover) { if (customCursor) customCursor.style.opacity = 0; return; }
-  if (customCursor) {
-    customCursor.style.opacity = 1;
-    customCursor.style.transform = `translate(${e.clientX}px, ${e.clientY}px)`;
-    customCursor.classList.toggle('hovering', !!e.target.closest('button, .thumb, input, select, .welcome-btn, .sidebar-dragbar'));
-  }
+  
+  isHoveringCursor = !!e.target.closest('button, .thumb, input, select, .welcome-btn, .sidebar-dragbar, .sidebar-toggle, .grid-toggle-btn');
 });
+
+function updateCursorLoop() {
+  if (useCustomCursor && !trafficLightHover) {
+    // ProMotion continuous lerp interpolation
+    cursorX += (targetX - cursorX) * 0.28;
+    cursorY += (targetY - cursorY) * 0.28;
+    
+    if (customCursor) {
+      customCursor.style.opacity = 1;
+      customCursor.style.transform = `translate(${cursorX}px, ${cursorY}px)`;
+      customCursor.classList.toggle('hovering', isHoveringCursor);
+    }
+  } else {
+    if (customCursor) customCursor.style.opacity = 0;
+  }
+  requestAnimationFrame(updateCursorLoop);
+}
+requestAnimationFrame(updateCursorLoop);
 
 media.addEventListener('wheel', (e) => {
   const img = getActiveImage(); if (!img) return;
@@ -934,6 +1296,7 @@ window.addEventListener('keydown', (e) => {
     if (['input', 'textarea', 'select'].includes((e.target?.tagName || '').toLowerCase())) return;
     if (e.key === 'ArrowRight') nav(1); if (e.key === 'ArrowLeft') nav(-1);
     if (e.key.toLowerCase() === 'e') editToggleBtn.click();
+    if (e.key.toLowerCase() === 't') { e.preventDefault(); showTagPill(); }
     if (e.key.toLowerCase() === 'i') {
         overlayVisible = !overlayVisible;
         edOverlay.classList.toggle('visible', overlayVisible);
@@ -944,6 +1307,7 @@ window.addEventListener('keydown', (e) => {
     }
     if (e.key.toLowerCase() === 'f') toggleFullscreen();
     if (e.key.toLowerCase() === 'b') sidebarToggle.click();
+    if (e.key.toLowerCase() === 'z') toggleZenMode();
 });
 
 /* ── Drag & Drop ── */
@@ -963,6 +1327,7 @@ getCurrentWebview().onDragDropEvent(async (event) => {
     try {
       const p = await invoke('open_specific_folder', { path: paths[0] });
       await invoke('add_recent_folder', { path: paths[0] });
+      renderRecentFolders();
       loadFolderData(p);
     } catch (err) { console.error(err); }
   }
@@ -970,6 +1335,12 @@ getCurrentWebview().onDragDropEvent(async (event) => {
 
 /* ── Histogram & Utilities ── */
 function sortItems() {
+  const rects = new Map();
+  document.querySelectorAll('.thumb').forEach(t => {
+    const path = t.dataset.path;
+    if (path) rects.set(path, t.getBoundingClientRect());
+  });
+
   if (currentSort === 'date') {
     items.sort((a, b) => (b.modified || 0) - (a.modified || 0));
   } else if (currentSort === 'size') {
@@ -977,7 +1348,37 @@ function sortItems() {
   } else {
     items.sort((a, b) => a.path.localeCompare(b.path));
   }
+  
   buildFilmstrip();
+
+  const newThumbs = document.querySelectorAll('.thumb');
+  newThumbs.forEach(t => {
+    const path = t.dataset.path;
+    if (path && rects.has(path)) {
+      const prevRect = rects.get(path);
+      const currentRect = t.getBoundingClientRect();
+      const dx = prevRect.left - currentRect.left;
+      const dy = prevRect.top - currentRect.top;
+      if (dx !== 0 || dy !== 0) {
+        t.style.transition = 'none';
+        t.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
+      }
+    }
+  });
+
+  document.body.offsetHeight; // force reflow
+
+  newThumbs.forEach(t => {
+    const path = t.dataset.path;
+    if (path && rects.has(path)) {
+      t.style.transition = 'transform 0.45s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.45s ease';
+      t.style.transform = 'translate3d(0, 0, 0)';
+      t.addEventListener('transitionend', () => {
+        t.style.transition = '';
+        t.style.transform = '';
+      }, { once: true });
+    }
+  });
 }
 const histogramCanvas = $('histogramCanvas'), histCtx = histogramCanvas?.getContext('2d'), histSample = document.createElement('canvas'), histSampleCtx = histSample.getContext('2d', { willReadFrequently: true });
 histSample.width = 256; histSample.height = 256;
@@ -1163,3 +1564,133 @@ window.addEventListener('keydown', (e) => {
   activeKeybindBtn.classList.remove('recording');
   activeKeybindBtn = null;
 }, true);
+
+/* ── Welcome Parallax & Zen Mode ── */
+welcome.addEventListener('mousemove', (e) => {
+  const w = welcome.clientWidth;
+  const h = welcome.clientHeight;
+  const x = (e.clientX - w / 2) / (w / 2);
+  const y = (e.clientY - h / 2) / (h / 2);
+  welcomeBg.style.setProperty('--parallax-x', `${x * -20}px`);
+  welcomeBg.style.setProperty('--parallax-y', `${y * -20}px`);
+});
+
+let zenModeActive = false;
+function toggleZenMode() {
+  zenModeActive = !zenModeActive;
+  document.body.classList.toggle('zen-mode', zenModeActive);
+  sidebar.classList.toggle('zen-hide', zenModeActive);
+  document.getElementById('zoomHud')?.classList.toggle('zen-hide', zenModeActive);
+  document.getElementById('editToggleBtn')?.classList.toggle('zen-hide', zenModeActive);
+  document.getElementById('sidebarToggle')?.classList.toggle('zen-hide', zenModeActive);
+  closeCropMode();
+  closeEditPanel();
+  showToast(zenModeActive ? 'Zen Mode Activated' : 'Zen Mode Deactivated');
+}
+
+function showTagPill() {
+  let pill = document.getElementById('tagPill');
+  if (pill) {
+    pill.querySelector('input').focus();
+    return;
+  }
+  
+  pill = document.createElement('div');
+  pill.id = 'tagPill';
+  pill.className = 'glassmorphic-pill-overlay';
+  pill.style.position = 'fixed';
+  pill.style.top = '40%';
+  pill.style.left = '50%';
+  pill.style.transform = 'translate(-50%, -50%) scale(0.9)';
+  pill.style.opacity = '0';
+  pill.style.transition = 'all 0.3s var(--ease-spring)';
+  pill.style.zIndex = '9999';
+  pill.style.display = 'flex';
+  pill.style.alignItems = 'center';
+  pill.style.gap = '8px';
+  pill.style.padding = '8px 16px';
+  pill.style.borderRadius = '30px';
+  pill.style.background = 'rgba(20, 20, 20, 0.65)';
+  pill.style.backdropFilter = 'blur(20px) saturate(180%)';
+  pill.style.border = '1px solid rgba(255,255,255,0.08)';
+  pill.style.boxShadow = '0 20px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04)';
+  
+  const icon = document.createElement('span');
+  icon.textContent = '🏷️';
+  icon.style.fontSize = '14px';
+  
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = 'Add tag to current photo...';
+  input.style.background = 'none';
+  input.style.border = 'none';
+  input.style.outline = 'none';
+  input.style.color = '#fff';
+  input.style.fontSize = '14px';
+  input.style.width = '200px';
+  input.style.fontFamily = 'inherit';
+  
+  pill.appendChild(icon);
+  pill.appendChild(input);
+  document.body.appendChild(pill);
+  
+  requestAnimationFrame(() => {
+    pill.style.transform = 'translate(-50%, -50%) scale(1)';
+    pill.style.opacity = '1';
+  });
+  
+  input.focus();
+  
+  const closePill = () => {
+    pill.style.transform = 'translate(-50%, -50%) scale(0.9)';
+    pill.style.opacity = '0';
+    setTimeout(() => pill.remove(), 250);
+  };
+  
+  input.addEventListener('keydown', async (evt) => {
+    if (evt.key === 'Escape') closePill();
+    if (evt.key === 'Enter') {
+      const tagName = input.value.trim();
+      if (!tagName) return;
+      
+      const item = items[idx];
+      if (item) {
+        try {
+          const colors = ['#D4A72C', '#E55E5E', '#4FA8EE', '#5BC2A8', '#AB6BFA'];
+          let hash = 0;
+          for (let i = 0; i < tagName.length; i++) hash = tagName.charCodeAt(i) + ((hash << 5) - hash);
+          const chosenColor = colors[Math.abs(hash) % colors.length];
+          
+          await invoke('add_tag_to_image', { path: item.path, tagName, tagColor: chosenColor });
+          showToast(`Tagged as "${tagName}"`);
+          
+          const activeThumb = document.querySelector(`.thumb.active`);
+          if (activeThumb) {
+            let dotsContainer = activeThumb.querySelector('.thumb-tag-dots');
+            if (!dotsContainer) {
+              dotsContainer = document.createElement('div');
+              dotsContainer.className = 'thumb-tag-dots';
+              activeThumb.appendChild(dotsContainer);
+            }
+            const dot = document.createElement('div');
+            dot.className = 'thumb-tag-dot';
+            dot.style.background = chosenColor;
+            dot.title = tagName;
+            dotsContainer.appendChild(dot);
+          }
+        } catch (e) {
+          showToast('Failed to save tag');
+        }
+      }
+      closePill();
+    }
+  });
+  
+  const clickOutside = (evt) => {
+    if (!pill.contains(evt.target)) {
+      closePill();
+      document.removeEventListener('mousedown', clickOutside);
+    }
+  };
+  document.addEventListener('mousedown', clickOutside);
+}

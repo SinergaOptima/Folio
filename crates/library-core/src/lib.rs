@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+pub use rusqlite;
 use anyhow::{Context, Result};
 use media_core::{ImageMetadata, decode_image, is_video_path, read_metadata, scan_supported_images};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -65,7 +66,7 @@ pub fn build_index(root: &Path, cache: &LibraryCache) -> Result<LibraryIndex> {
 }
 
 pub struct LibraryCache {
-    connection: std::sync::Mutex<Connection>,
+    pub connection: std::sync::Mutex<Connection>,
     thumb_dir: PathBuf,
     decoded_dir: PathBuf,
 }
@@ -110,6 +111,26 @@ impl LibraryCache {
                 shutter_speed TEXT,
                 iso TEXT,
                 focal_length TEXT
+            );
+            CREATE TABLE IF NOT EXISTS albums (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS album_images (
+                album_id INTEGER,
+                image_path TEXT,
+                PRIMARY KEY (album_id, image_path),
+                FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                color TEXT
+            );
+            CREATE TABLE IF NOT EXISTS image_tags (
+                image_path TEXT,
+                tag_name TEXT,
+                PRIMARY KEY (image_path, tag_name)
             );
             "#,
         )?;

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tauri::State;
 use parking_lot::RwLock;
 
-use library_core::{LibraryCache, LibraryIndex, build_index};
+use library_core::{LibraryCache, LibraryIndex, build_index, rusqlite};
 use media_core::{SimpleEdit, apply_edit, is_video_path};
 use image::GenericImageView;
 
@@ -64,6 +64,32 @@ async fn set_window_vibrancy(window: tauri::Window, enabled: bool) -> Result<(),
     Ok(())
 }
 
+fn get_recents_path() -> std::path::PathBuf {
+    let base = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
+    let root = base.join("folio-app");
+    let _ = std::fs::create_dir_all(&root);
+    root.join("recents.json")
+}
+
+fn load_recent_folders() -> Vec<String> {
+    let path = get_recents_path();
+    if path.exists() {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            if let Ok(list) = serde_json::from_str::<Vec<String>>(&content) {
+                return list;
+            }
+        }
+    }
+    Vec::new()
+}
+
+fn save_recent_folders(recents: &[String]) {
+    let path = get_recents_path();
+    if let Ok(content) = serde_json::to_string(recents) {
+        let _ = std::fs::write(path, content);
+    }
+}
+
 #[tauri::command]
 async fn get_recent_folders(state: State<'_, Arc<AppState>>) -> Result<Vec<String>, String> {
     Ok(state.recent_folders.read().clone())
@@ -79,7 +105,7 @@ async fn add_recent_folder(path: String, state: State<'_, Arc<AppState>>) -> Res
     if recents.len() > 10 {
         recents.pop();
     }
-    // In a real app we'd persist this to a file here
+    save_recent_folders(&recents);
     Ok(())
 }
 
@@ -363,7 +389,7 @@ fn copy_jpeg_exif(src_path: &Path, dest_path: &Path) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn export_edited(path: String, dest: String, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+async fn export_edited(path: String, dest: String, strip_metadata: bool, state: State<'_, Arc<AppState>>) -> Result<(), String> {
     let state_arc = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let edit = state_arc.edits.read().get(&path).cloned().unwrap_or_default();
@@ -375,13 +401,221 @@ async fn export_edited(path: String, dest: String, state: State<'_, Arc<AppState
         let fmt = image::ImageFormat::from_path(&dest_path).unwrap_or(image::ImageFormat::Jpeg);
         edited.save_with_format(&dest_path, fmt).map_err(|e| e.to_string())?;
         
-        if fmt == image::ImageFormat::Jpeg {
+        if !strip_metadata && fmt == image::ImageFormat::Jpeg {
             let src_ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
             if src_ext == "jpg" || src_ext == "jpeg" {
                 let _ = copy_jpeg_exif(&p, &dest_path);
             }
         }
         Ok::<(), String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn update_exif_metadata(
+    path: String,
+    camera: Option<String>,
+    aperture: Option<String>,
+    shutter_speed: Option<String>,
+    iso: Option<String>,
+    focal_length: Option<String>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    let state_arc = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = state_arc.cache.connection.lock().unwrap();
+        conn.execute(
+            "UPDATE image_metadata SET camera = ?, aperture = ?, shutter_speed = ?, iso = ?, focal_length = ? WHERE path = ?",
+            rusqlite::params![camera, aperture, shutter_speed, iso, focal_length, path],
+        ).map_err(|e| e.to_string())?;
+
+        let mut index_lock = state_arc.index.write();
+        if let Some(index) = &mut *index_lock {
+            if let Some(item) = index.items.iter_mut().find(|it| it.path.to_string_lossy() == path) {
+                if item.metadata.exif.is_none() {
+                    item.metadata.exif = Some(media_core::ExifData::default());
+                }
+                if let Some(exif) = &mut item.metadata.exif {
+                    exif.camera = camera;
+                    exif.aperture = aperture;
+                    exif.shutter_speed = shutter_speed;
+                    exif.iso = iso;
+                    exif.focal_length = focal_length;
+                }
+            }
+        }
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct TagInfo {
+    pub name: String,
+    pub color: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct AlbumInfo {
+    pub id: i64,
+    pub name: String,
+}
+
+#[tauri::command]
+async fn add_tag_to_image(
+    path: String,
+    tag_name: String,
+    tag_color: Option<String>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    let state_arc = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = state_arc.cache.connection.lock().unwrap();
+        let color = tag_color.unwrap_or_else(|| "#D4A72C".to_string());
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO tags (name, color) VALUES (?, ?)",
+            rusqlite::params![tag_name, color],
+        );
+        conn.execute(
+            "INSERT OR IGNORE INTO image_tags (image_path, tag_name) VALUES (?, ?)",
+            rusqlite::params![path, tag_name],
+        ).map_err(|e| e.to_string())?;
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn remove_tag_from_image(
+    path: String,
+    tag_name: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    let state_arc = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = state_arc.cache.connection.lock().unwrap();
+        conn.execute(
+            "DELETE FROM image_tags WHERE image_path = ? AND tag_name = ?",
+            rusqlite::params![path, tag_name],
+        ).map_err(|e| e.to_string())?;
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn get_image_tags(path: String, state: State<'_, Arc<AppState>>) -> Result<Vec<TagInfo>, String> {
+    let state_arc = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = state_arc.cache.connection.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT it.tag_name, COALESCE(t.color, '#D4A72C') FROM image_tags it LEFT JOIN tags t ON it.tag_name = t.name WHERE it.image_path = ?"
+        ).map_err(|e| e.to_string())?;
+        let rows = stmt.query_map(rusqlite::params![path], |row| {
+            Ok(TagInfo {
+                name: row.get(0)?,
+                color: row.get(1)?,
+            })
+        }).map_err(|e| e.to_string())?;
+        let mut tags = Vec::new();
+        for row in rows {
+            tags.push(row.map_err(|e| e.to_string())?);
+        }
+        Ok::<Vec<TagInfo>, String>(tags)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn get_all_tags(state: State<'_, Arc<AppState>>) -> Result<Vec<TagInfo>, String> {
+    let state_arc = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = state_arc.cache.connection.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT name, color FROM tags").map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([], |row| {
+            Ok(TagInfo {
+                name: row.get(0)?,
+                color: row.get(1)?,
+            })
+        }).map_err(|e| e.to_string())?;
+        let mut tags = Vec::new();
+        for row in rows {
+            tags.push(row.map_err(|e| e.to_string())?);
+        }
+        Ok::<Vec<TagInfo>, String>(tags)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn create_album(name: String, state: State<'_, Arc<AppState>>) -> Result<i64, String> {
+    let state_arc = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = state_arc.cache.connection.lock().unwrap();
+        conn.execute(
+            "INSERT INTO albums (name) VALUES (?)",
+            rusqlite::params![name],
+        ).map_err(|e| e.to_string())?;
+        Ok::<i64, String>(conn.last_insert_rowid())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn add_image_to_album(album_id: i64, path: String, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    let state_arc = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = state_arc.cache.connection.lock().unwrap();
+        conn.execute(
+            "INSERT OR IGNORE INTO album_images (album_id, image_path) VALUES (?, ?)",
+            rusqlite::params![album_id, path],
+        ).map_err(|e| e.to_string())?;
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn remove_image_from_album(album_id: i64, path: String, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    let state_arc = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = state_arc.cache.connection.lock().unwrap();
+        conn.execute(
+            "DELETE FROM album_images WHERE album_id = ? AND image_path = ?",
+            rusqlite::params![album_id, path],
+        ).map_err(|e| e.to_string())?;
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn get_all_albums(state: State<'_, Arc<AppState>>) -> Result<Vec<AlbumInfo>, String> {
+    let state_arc = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = state_arc.cache.connection.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id, name FROM albums").map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([], |row| {
+            Ok(AlbumInfo {
+                id: row.get(0)?,
+                name: row.get(1)?,
+            })
+        }).map_err(|e| e.to_string())?;
+        let mut albums = Vec::new();
+        for row in rows {
+            albums.push(row.map_err(|e| e.to_string())?);
+        }
+        Ok::<Vec<AlbumInfo>, String>(albums)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -454,7 +688,7 @@ fn main() {
         index: RwLock::new(None),
         edits: RwLock::new(HashMap::new()),
         preview_cache: RwLock::new(HashMap::new()),
-        recent_folders: RwLock::new(Vec::new()),
+        recent_folders: RwLock::new(load_recent_folders()),
         resolved_thumbs: RwLock::new(HashMap::new()),
     });
 
@@ -581,6 +815,15 @@ fn main() {
             prepare_edit_preview,
             edit_image,
             export_edited,
+            update_exif_metadata,
+            add_tag_to_image,
+            remove_tag_from_image,
+            get_image_tags,
+            get_all_tags,
+            create_album,
+            add_image_to_album,
+            remove_image_from_album,
+            get_all_albums,
             get_edit,
             set_edit,
             set_window_vibrancy,

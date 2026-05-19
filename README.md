@@ -14,25 +14,37 @@ Folio is a high-performance, macOS-native media viewer. It uses Tauri for its ar
 - **Precise Zoom**: Buttery smooth, customizable `Shift+Scroll` variable zoom that perfectly tracks the cursor with drag panning.
 - **Simple Photo Editing**: Non-destructive adjustments for Brightness and Vibrance, plus instant Horizontal/Vertical flipping.
 
-## Roadmap (Near Term)
-We are actively building out Folio's UI/UX to make it the most premium media viewer on macOS. Coming soon:
-- **Drag-and-Drop Support:** Open folders or images directly from Finder via drag-and-drop.
-- **Double-Click Smart Zoom:** Instantly toggle between "Fit to Screen" and "100% Zoom" at your cursor's location.
-- **Cinematic Transitions:** Optional fluid crossfades and sliding animations when navigating between media.
-- **Sidebar Enhancements:** Collapsible and resizable sidebar for a truly distraction-free layout.
-- **Animated Sorting:** Smooth FLIP animations when re-ordering thumbnails.
-- **Scroll Snapping & Centering:** Arrow-key navigation will smoothly center the active thumbnail.
-- **Interactive Welcome Screen:** Parallax effects and gradient shifting that reacts to your mouse.
-- **Photography Histogram:** A sleek luminance/RGB histogram added to the editorial overlay.
-- **Polished Loading States:** Beautiful indeterminate loaders for massive RAW/TIFF files.
-- **Settings Tabs:** A categorized, tabbed settings modal for easier navigation.
-- **System & Accessibility:** Toggle for the custom magnetic cursor, toast notifications for actions, traffic-light hover handling, and elegant empty states.
+## Roadmap (Upcoming High-Fidelity Phases)
 
-## Roadmap (Next Few Days)
-Beyond immediate UX polish, Folio will expand into a minimal but powerful workflow tool:
-- **Minimal Photograph Editing:** Crop, rotate, and straighten tools built directly into the viewer.
-- **EXIF Editing:** Ability to modify or strip metadata before exporting.
-- **Smart Tags & Albums:** Local tagging system to curate mini-collections without moving files on disk.
+We are actively developing Folio into the most premium, high-performance media viewer and workflow tool for macOS. Our curated upcoming development phases include:
+
+### 🎨 Visual & Aesthetic Elegance (macOS Native)
+- **Dynamic App Vibrancy**: Reactively shift window backdrop transparency and tinting based on the active image's dominant HSL triad.
+- **Bilinear/Lanczos GPU downscaling**: GPU-accelerated scaling shaders that maintain ultra-crisp, sharp image rendering for high-megapixel assets when zoomed out.
+- **Cinematic Crossfades**: Seamless, smooth crossfading animations during automatic slideshow navigation.
+- **Haptic Trackpad Zoom Snapping**: Trigger native macOS haptic trackpad ticks when zooming boundaries cross 100%, 200%, or fit-to-screen thresholds.
+- **Full-Screen Zoomable Media Grid**: A dedicated full-screen catalog viewport utilizing `Cmd` + `+`/`-` key combinations to dynamically zoom grid layouts, with right-click options to directly create, rename, and manage physical directories on disk.
+
+### ⚡ Blazing Performance (Apple Silicon Optimization)
+- **Apple Silicon Neon Resizer**: Native Rust SIMD/NEON-assisted image scaling to speed up heavy RAW and TIFF loading times by 400%.
+- **Filesystem Hot-Watcher**: Real-time folder syncing that instantly updates Folio when files are added, removed, or edited in Finder.
+- **Zero-Lag Predictive Caching**: Multi-threaded preloader that decodes the next three adjacent images in the background.
+- **LruMemory Auto-Shrinker**: Smart buffer manager that automatically purges memory caches under system pressure events.
+- **Featherweight App Footprint**: Dynamic code-stripping and compact dependency audits to keep the Tauri binary size exceptionally small.
+
+### 📸 Professional Photography Workflow
+- **Frosted MapKit GPS Popup**: Tapping location coordinates inside the EXIF overlay (`I`) launches a beautiful inline Apple Maps snippet.
+- **Double-Pane Before/After Compare**: A sliding comparative viewport to inspect original vs. edited versions side-by-side.
+- **Dynamic SERIF Watermarking**: Custom typographic serine-style signature overrides applied dynamically on image export.
+- **Intelligent Visual Similarity Finder**: Local perceptual visual hashing (dHash) to flag duplicates or blurry frames inside a directory.
+- **Accessibility Color Simulator**: Real-time filters (Protanopia, Deuteranopia, Tritanopia) for designers auditing assets.
+- **Format Transcode HUD**: Quick-action batch converter pill at the bottom of the grid view (supporting lossless conversions to and from WebP, PNG, JPEG, AVIF, TIFF, etc.).
+
+### 🔒 Privacy, Tagging, & System Integrations
+- **AES-256 Secure Vault**: Encrypted private folder galleries locked securely behind TouchID/FaceID.
+- **Gestural Flick-to-Trash**: Swipe or flick thumbnails upwards with physics-based spring acceleration to quickly trash files.
+- **Apple Live Photos Playback**: Support playing Live Photo HEIC + MOV combinations by holding click on the media viewport.
+- **Advanced Trackpad Gestures**: Buttery smooth multi-touch gestures for navigation swipe-paging, viewport scaling, and direct panning.
 
 > **Note:** The auto-updater is currently on hold due to signature and certificate issues. Please download manual updates from the GitHub Releases page.
 
