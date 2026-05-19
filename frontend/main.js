@@ -87,6 +87,10 @@ app.innerHTML = `
       </div>
       <div class="editorial-tech-data" id="edTechData"></div>
       <canvas class="editorial-histogram" id="histogramCanvas" width="220" height="56" aria-hidden="true"></canvas>
+      <div class="editorial-palette" id="editorialPalette" style="margin-top: 16px; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 12px;">
+        <span class="editorial-stat-label">Dominant Palette</span>
+        <div id="paletteChips" style="display: flex; gap: 8px; margin-top: 4px;"></div>
+      </div>
     </div>
     <button class="nav-arrow prev" id="prev">‹</button>
     <button class="nav-arrow next" id="next">›</button>
@@ -635,7 +639,10 @@ function show(i, dir = null) {
         if (ph) ph.remove();
         updateAdaptiveGlow(img);
         if (editPanelOpen) invoke('prepare_edit_preview', { path: item.path }).then(() => loadEditForCurrent()).catch(e => console.error(e));
-        if (overlayVisible) drawHistogram(img);
+        if (overlayVisible) {
+            drawHistogram(img);
+            drawDominantColors(item);
+        }
     };
     img.onload = onImgReady;
     img.onerror = onImgReady;
@@ -927,7 +934,14 @@ window.addEventListener('keydown', (e) => {
     if (['input', 'textarea', 'select'].includes((e.target?.tagName || '').toLowerCase())) return;
     if (e.key === 'ArrowRight') nav(1); if (e.key === 'ArrowLeft') nav(-1);
     if (e.key.toLowerCase() === 'e') editToggleBtn.click();
-    if (e.key.toLowerCase() === 'i') { overlayVisible = !overlayVisible; edOverlay.classList.toggle('visible', overlayVisible); if (overlayVisible) drawHistogram(getActiveImage()); }
+    if (e.key.toLowerCase() === 'i') {
+        overlayVisible = !overlayVisible;
+        edOverlay.classList.toggle('visible', overlayVisible);
+        if (overlayVisible) {
+            drawHistogram(getActiveImage());
+            drawDominantColors(items[idx]);
+        }
+    }
     if (e.key.toLowerCase() === 'f') toggleFullscreen();
     if (e.key.toLowerCase() === 'b') sidebarToggle.click();
 });
@@ -978,6 +992,58 @@ function drawHistogram(imgEl) {
   const drawC = (buckets, color) => { histCtx.beginPath(); histCtx.moveTo(0, H); for (let i = 0; i < 256; i++) histCtx.lineTo((i/255)*W, H - (buckets[i]/peak)*H); histCtx.lineTo(W, H); histCtx.fillStyle = color; histCtx.fill(); };
   drawC(rB, 'rgba(255,75,75,0.4)'); drawC(gB, 'rgba(75,210,100,0.4)'); drawC(bB, 'rgba(75,130,255,0.4)'); drawC(lB, 'rgba(255,255,255,0.65)');
 }
+
+async function drawDominantColors(item) {
+  const container = document.getElementById('paletteChips');
+  if (!container) return;
+  container.innerHTML = '';
+  if (!item || !item.path) return;
+  
+  try {
+    const colors = await invoke('get_dominant_colors', { path: item.path });
+    container.innerHTML = '';
+    colors.forEach(color => {
+      const chip = document.createElement('div');
+      chip.className = 'palette-chip';
+      chip.style.width = '20px';
+      chip.style.height = '20px';
+      chip.style.borderRadius = '50%';
+      chip.style.background = color;
+      chip.style.cursor = 'pointer';
+      chip.style.border = '1px solid rgba(255,255,255,0.25)';
+      chip.style.transition = 'transform 0.15s ease, box-shadow 0.15s ease';
+      chip.setAttribute('data-tooltip', `Copy: ${color}`);
+      
+      chip.addEventListener('mouseenter', () => {
+        chip.style.transform = 'scale(1.25)';
+        chip.style.boxShadow = `0 0 6px ${color}`;
+      });
+      chip.addEventListener('mouseleave', () => {
+        chip.style.transform = 'scale(1)';
+        chip.style.boxShadow = 'none';
+      });
+      
+      chip.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(color);
+          showToast(`Copied ${color} to clipboard!`);
+          chip.style.transform = 'scale(1.45)';
+          setTimeout(() => {
+            chip.style.transform = 'scale(1.25)';
+          }, 120);
+        } catch (err) {
+          showToast('Failed to copy color to clipboard');
+        }
+      });
+      
+      container.appendChild(chip);
+    });
+    initTooltips();
+  } catch (e) {
+    console.error('Failed to get dominant colors:', e);
+  }
+}
+
 function extractDominantColor(imgEl) {
   try {
     const c = document.createElement('canvas'); c.width = 64; c.height = 64; const ctx = c.getContext('2d');

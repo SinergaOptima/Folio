@@ -1,8 +1,8 @@
+#![allow(unsafe_code)]
 pub mod edit;
 pub use edit::{SimpleEdit, apply_edit};
 
 use std::fs::File;
-use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -261,8 +261,12 @@ pub fn open_image(path: &Path) -> Result<DynamicImage> {
         .unwrap_or_default();
 
     if image_crate_native(&ext) {
-        return image::open(path)
-            .with_context(|| format!("failed to decode image: {}", path.display()));
+        let file = std::fs::File::open(path)
+            .with_context(|| format!("failed to open image file: {}", path.display()))?;
+        let mmap = unsafe { memmap2::Mmap::map(&file) }
+            .with_context(|| format!("failed to memory-map image: {}", path.display()))?;
+        return image::load_from_memory(&mmap)
+            .with_context(|| format!("failed to decode memory-mapped image: {}", path.display()));
     }
 
     // On macOS, always use sips for TIFF and everything else non-native.
@@ -307,8 +311,11 @@ pub fn read_metadata_fast(path: &Path) -> Result<ImageMetadata> {
 
     // For image-crate-native formats, try fast header-only dimension read
     let (width, height, format) = if image_crate_native(&ext) {
-        let reader = ImageReader::open(path)
-            .with_context(|| format!("failed to open image: {}", path.display()))?
+        let file = std::fs::File::open(path)
+            .with_context(|| format!("failed to open image file: {}", path.display()))?;
+        let mmap = unsafe { memmap2::Mmap::map(&file) }
+            .with_context(|| format!("failed to memory-map image: {}", path.display()))?;
+        let reader = ImageReader::new(std::io::Cursor::new(&mmap))
             .with_guessed_format()
             .with_context(|| format!("failed to guess format: {}", path.display()))?;
         let fmt = reader.format();
@@ -382,7 +389,8 @@ fn read_exif_orientation(path: &Path) -> Result<u16> {
 
 fn read_full_exif(path: &Path) -> Result<(u16, Option<ExifData>)> {
     let file = File::open(path)?;
-    let mut reader = BufReader::new(file);
+    let mmap = unsafe { memmap2::Mmap::map(&file)? };
+    let mut reader = std::io::Cursor::new(&mmap);
     let exif = match Reader::new().read_from_container(&mut reader) {
         Ok(e) => e,
         Err(_) => return Ok((1, None)),
@@ -448,6 +456,72 @@ fn apply_orientation(image: DynamicImage, orientation: u16) -> DynamicImage {
         8 => image.rotate270(),
         _ => image,
     }
+}
+
+pub fn extract_dominant_colors(img: &DynamicImage, count: usize) -> Vec<String> {
+    let small = img.resize_exact(32, 32, image::imageops::FilterType::Nearest);
+    let rgb = small.to_rgb8();
+    
+    let pixels: Vec<[f32; 3]> = rgb.pixels().map(|p| {
+        [p[0] as f32, p[1] as f32, p[2] as f32]
+    }).collect();
+    
+    if pixels.is_empty() {
+        return vec!["#000000".to_string(); count];
+    }
+    
+    let mut centroids = Vec::new();
+    let step = pixels.len() / count;
+    for i in 0..count {
+        centroids.push(pixels[(i * step).min(pixels.len() - 1)]);
+    }
+    
+    for _ in 0..5 {
+        let mut clusters: Vec<Vec<[f32; 3]>> = vec![Vec::new(); count];
+        for &pixel in &pixels {
+            let mut best_centroid = 0;
+            let mut best_dist = f32::MAX;
+            for (c_idx, &centroid) in centroids.iter().enumerate() {
+                let dist = (pixel[0] - centroid[0]).powi(2)
+                    + (pixel[1] - centroid[1]).powi(2)
+                    + (pixel[2] - centroid[2]).powi(2);
+                if dist < best_dist {
+                    best_dist = dist;
+                    best_centroid = c_idx;
+                }
+            }
+            clusters[best_centroid].push(pixel);
+        }
+        
+        for (c_idx, cluster) in clusters.iter().enumerate() {
+            if !cluster.is_empty() {
+                let mut sum = [0.0, 0.0, 0.0];
+                for &p in cluster {
+                    sum[0] += p[0];
+                    sum[1] += p[1];
+                    sum[2] += p[2];
+                }
+                let len = cluster.len() as f32;
+                centroids[c_idx] = [sum[0] / len, sum[1] / len, sum[2] / len];
+            }
+        }
+    }
+    
+    let mut hex_colors = Vec::new();
+    for centroid in centroids {
+        let r = centroid[0].clamp(0.0, 255.0) as u8;
+        let g = centroid[1].clamp(0.0, 255.0) as u8;
+        let b = centroid[2].clamp(0.0, 255.0) as u8;
+        hex_colors.push(format!("#{:02x}{:02x}{:02x}", r, g, b));
+    }
+    
+    hex_colors.sort();
+    hex_colors.dedup();
+    while hex_colors.len() < count {
+        hex_colors.push("#000000".to_string());
+    }
+    hex_colors.truncate(count);
+    hex_colors
 }
 
 #[cfg(test)]

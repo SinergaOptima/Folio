@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::io::Cursor;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::State;
 use parking_lot::RwLock;
@@ -113,7 +113,7 @@ async fn open_folder_picker(state: State<'_, Arc<AppState>>) -> Result<Option<St
         let state_clone = state_arc.clone();
         let paths: Vec<PathBuf> = index.items.iter().map(|item| item.path.clone()).collect();
         std::thread::spawn(move || {
-            state_clone.cache.warm_thumbnails(&paths, 320);
+            state_clone.cache.warm_thumbnails(&paths, 0, 320);
         });
 
         Ok::<String, String>(path_str)
@@ -136,7 +136,7 @@ async fn open_specific_folder(path: String, state: State<'_, Arc<AppState>>) -> 
         let state_clone = state_arc.clone();
         let paths: Vec<PathBuf> = index.items.iter().map(|item| item.path.clone()).collect();
         std::thread::spawn(move || {
-            state_clone.cache.warm_thumbnails(&paths, 320);
+            state_clone.cache.warm_thumbnails(&paths, 0, 320);
         });
 
         Ok::<String, String>(path_str)
@@ -302,6 +302,66 @@ async fn edit_image(path: String, edit: SimpleEdit, state: State<'_, Arc<AppStat
     .map_err(|e| e.to_string())?
 }
 
+fn copy_jpeg_exif(src_path: &Path, dest_path: &Path) -> Result<(), String> {
+    let src_bytes = std::fs::read(src_path).map_err(|e| e.to_string())?;
+    let mut dest_bytes = std::fs::read(dest_path).map_err(|e| e.to_string())?;
+    
+    let mut src_app1 = None;
+    let mut i = 2;
+    while i < src_bytes.len() - 1 {
+        if src_bytes[i] == 0xFF {
+            let marker = src_bytes[i + 1];
+            if marker == 0xD9 || marker == 0xDA {
+                break;
+            }
+            if i + 3 >= src_bytes.len() {
+                break;
+            }
+            let len = ((src_bytes[i + 2] as usize) << 8) | (src_bytes[i + 3] as usize);
+            if marker == 0xE1 {
+                if i + 4 + 6 <= src_bytes.len() && &src_bytes[i + 4..i + 10] == b"Exif\0\0" {
+                    src_app1 = Some(&src_bytes[i..i + 2 + len]);
+                    break;
+                }
+            }
+            i += 2 + len;
+        } else {
+            i += 1;
+        }
+    }
+    
+    if let Some(app1) = src_app1 {
+        let mut insert_pos = 2;
+        let mut dest_i = 2;
+        while dest_i < dest_bytes.len() - 1 {
+            if dest_bytes[dest_i] == 0xFF {
+                let marker = dest_bytes[dest_i + 1];
+                if marker == 0xD9 || marker == 0xDA {
+                    break;
+                }
+                if dest_i + 3 >= dest_bytes.len() {
+                    break;
+                }
+                let len = ((dest_bytes[dest_i + 2] as usize) << 8) | (dest_bytes[dest_i + 3] as usize);
+                if marker == 0xE1 {
+                    if dest_i + 4 + 6 <= dest_bytes.len() && &dest_bytes[dest_i + 4..dest_i + 10] == b"Exif\0\0" {
+                        dest_bytes.drain(dest_i..dest_i + 2 + len);
+                        insert_pos = dest_i;
+                        break;
+                    }
+                }
+                dest_i += 2 + len;
+            } else {
+                dest_i += 1;
+            }
+        }
+        
+        dest_bytes.splice(insert_pos..insert_pos, app1.iter().cloned());
+        std::fs::write(dest_path, dest_bytes).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn export_edited(path: String, dest: String, state: State<'_, Arc<AppState>>) -> Result<(), String> {
     let state_arc = state.inner().clone();
@@ -314,7 +374,29 @@ async fn export_edited(path: String, dest: String, state: State<'_, Arc<AppState
         let dest_path = PathBuf::from(&dest);
         let fmt = image::ImageFormat::from_path(&dest_path).unwrap_or(image::ImageFormat::Jpeg);
         edited.save_with_format(&dest_path, fmt).map_err(|e| e.to_string())?;
+        
+        if fmt == image::ImageFormat::Jpeg {
+            let src_ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+            if src_ext == "jpg" || src_ext == "jpeg" {
+                let _ = copy_jpeg_exif(&p, &dest_path);
+            }
+        }
         Ok::<(), String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn get_dominant_colors(path: String) -> Result<Vec<String>, String> {
+    let p = std::path::PathBuf::from(&path);
+    if media_core::is_video_path(&p) {
+        return Ok(vec![]);
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let img = media_core::open_image(&p).map_err(|e| e.to_string())?;
+        let colors = media_core::extract_dominant_colors(&img, 5);
+        Ok(colors)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -505,6 +587,7 @@ fn main() {
             get_recent_folders,
             add_recent_folder,
             trigger_macos_sound,
+            get_dominant_colors,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -300,8 +300,13 @@ impl LibraryCache {
         Ok(cached)
     }
 
-    pub fn warm_thumbnails(&self, paths: &[PathBuf], max_side: u32) {
-        paths.par_iter().for_each(|path| {
+    pub fn warm_thumbnails(&self, paths: &[PathBuf], active_index: usize, max_side: u32) {
+        let mut sorted_paths = paths.to_vec();
+        sorted_paths.sort_by_key(|path| {
+            let orig_idx = paths.iter().position(|p| p == path).unwrap_or(0);
+            (orig_idx as isize - active_index as isize).abs()
+        });
+        sorted_paths.par_iter().for_each(|path| {
             let _ = self.ensure_thumbnail(path, max_side);
         });
     }
