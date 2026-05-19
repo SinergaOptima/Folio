@@ -712,11 +712,12 @@ async function renderRecentFolders() {
   }
 
   try {
-    const list = await invoke('get_recent_folders');
-    if (!list || list.length === 0) {
+    const fullList = await invoke('get_recent_folders');
+    if (!fullList || fullList.length === 0) {
       container.innerHTML = '';
       return;
     }
+    const list = fullList.slice(0, 4);
 
     container.innerHTML = '<div class="recents-title">Recent Folders</div>';
     list.forEach(path => {
@@ -910,13 +911,230 @@ function show(i, dir = null) {
       v.classList.add('loaded');
       const ctrl = document.createElement('div');
       ctrl.className = 'video-controls';
-      ctrl.innerHTML = `<button class="v-play-btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></button><input type="range" class="v-progress" value="0" min="0" max="100"><span class="v-time">0:00</span>`;
-      const playBtn = ctrl.querySelector('.v-play-btn'), progress = ctrl.querySelector('.v-progress'), time = ctrl.querySelector('.v-time');
-      playBtn.onclick = () => { if (v.paused) { v.play(); playBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>'; } else { v.pause(); playBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="6,3 20,12 6,21"/></svg>'; } };
-      v.ontimeupdate = () => { const p = (v.currentTime / v.duration) * 100; progress.value = p; const mins = Math.floor(v.currentTime / 60), secs = Math.floor(v.currentTime % 60); time.textContent = `${mins}:${secs.toString().padStart(2, '0')}`; };
-      progress.oninput = () => { v.currentTime = (progress.value / 100) * v.duration; };
+      ctrl.innerHTML = `
+        <button class="v-play-btn" aria-label="Play/Pause">
+          <svg class="v-icon-play" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="display:none;"><polygon points="6,3 20,12 6,21"/></svg>
+          <svg class="v-icon-pause" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+        </button>
+        <input type="range" class="v-progress" value="0" min="0" max="100" step="0.1">
+        <span class="v-time">0:00 / 0:00</span>
+        <div class="v-volume-container">
+          <button class="v-volume-btn" aria-label="Mute/Unmute">
+            <svg class="v-icon-volume-high" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+            <svg class="v-icon-volume-muted" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+          </button>
+          <input type="range" class="v-volume-slider" min="0" max="100" value="100">
+        </div>
+        <button class="v-fullscreen-btn" aria-label="Fullscreen">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+        </button>
+      `;
+
+      const playBtn = ctrl.querySelector('.v-play-btn');
+      const progress = ctrl.querySelector('.v-progress');
+      const time = ctrl.querySelector('.v-time');
+      const volBtn = ctrl.querySelector('.v-volume-btn');
+      const volSlider = ctrl.querySelector('.v-volume-slider');
+      const fsBtn = ctrl.querySelector('.v-fullscreen-btn');
+
+      const iconPlay = playBtn.querySelector('.v-icon-play');
+      const iconPause = playBtn.querySelector('.v-icon-pause');
+      const iconVolHigh = volBtn.querySelector('.v-icon-volume-high');
+      const iconVolMuted = volBtn.querySelector('.v-icon-volume-muted');
+
+      // State machine for seek scrubbing
+      let isScrubbing = false;
+      let wasPlayingBeforeScrub = false;
+
+      const updatePlayButtonUI = () => {
+        if (v.paused) {
+          iconPlay.style.display = 'block';
+          iconPause.style.display = 'none';
+        } else {
+          iconPlay.style.display = 'none';
+          iconPause.style.display = 'block';
+        }
+      };
+
+      playBtn.onclick = () => {
+        if (v.paused) {
+          v.play().catch(e => console.error(e));
+        } else {
+          v.pause();
+        }
+        updatePlayButtonUI();
+      };
+
+      v.onplay = updatePlayButtonUI;
+      v.onpause = updatePlayButtonUI;
+
+      const updateTimeText = () => {
+        const curTime = v.currentTime || 0;
+        const durTime = v.duration || 0;
+        const curMins = Math.floor(curTime / 60), curSecs = Math.floor(curTime % 60);
+        const durMins = Math.floor(durTime / 60), durSecs = Math.floor(durTime % 60);
+        time.textContent = `${curMins}:${curSecs.toString().padStart(2, '0')} / ${durMins}:${durSecs.toString().padStart(2, '0')}`;
+      };
+
+      v.onloadedmetadata = updateTimeText;
+
+      v.ontimeupdate = () => {
+        if (!isScrubbing) {
+          const p = v.duration ? (v.currentTime / v.duration) * 100 : 0;
+          progress.value = p;
+          updateTimeText();
+        }
+      };
+
+      // Scrubbing event handlers
+      const endScrub = (e) => {
+        if (isScrubbing) {
+          isScrubbing = false;
+          ctrl.classList.remove('scrubbing-active');
+          if (v.duration) {
+            v.currentTime = (progress.value / 100) * v.duration;
+          }
+          if (wasPlayingBeforeScrub) {
+            v.play().catch(e => console.error(e));
+          }
+        }
+        window.removeEventListener('pointerup', endScrub);
+        window.removeEventListener('pointercancel', endScrub);
+        window.removeEventListener('mouseup', endScrub);
+        window.removeEventListener('blur', endScrub);
+      };
+
+      progress.addEventListener('pointerdown', (e) => {
+        isScrubbing = true;
+        wasPlayingBeforeScrub = !v.paused;
+        v.pause();
+        ctrl.classList.add('scrubbing-active');
+
+        window.addEventListener('pointerup', endScrub);
+        window.addEventListener('pointercancel', endScrub);
+        window.addEventListener('mouseup', endScrub);
+        window.addEventListener('blur', endScrub);
+      });
+
+      progress.addEventListener('input', () => {
+        if (v.duration) {
+          const seekTime = (progress.value / 100) * v.duration;
+          v.currentTime = seekTime;
+          // Render immediate scrubbing time frame feedback
+          const curMins = Math.floor(seekTime / 60), curSecs = Math.floor(seekTime % 60);
+          const durMins = Math.floor(v.duration / 60), durSecs = Math.floor(v.duration % 60);
+          time.textContent = `${curMins}:${curSecs.toString().padStart(2, '0')} / ${durMins}:${durSecs.toString().padStart(2, '0')}`;
+        }
+      });
+
+      // Volume slider slide-out handler
+      let savedVolume = localStorage.getItem('folio_video_volume');
+      let savedMuted = localStorage.getItem('folio_video_muted');
+
+      if (savedVolume !== null) {
+        v.volume = parseFloat(savedVolume);
+      } else {
+        v.volume = 0.8;
+      }
+
+      if (savedMuted !== null) {
+        v.muted = savedMuted === 'true';
+      } else {
+        v.muted = false;
+      }
+
+      let lastVolume = v.volume > 0 ? v.volume : 0.8;
+
+      const updateVolumeUI = () => {
+        volSlider.value = v.muted ? 0 : v.volume * 100;
+        if (v.muted || v.volume === 0) {
+          iconVolHigh.style.display = 'none';
+          iconVolMuted.style.display = 'block';
+        } else {
+          iconVolHigh.style.display = 'block';
+          iconVolMuted.style.display = 'none';
+        }
+      };
+
+      const endVolDrag = (e) => {
+        ctrl.classList.remove('volume-active');
+
+        window.removeEventListener('pointerup', endVolDrag);
+        window.removeEventListener('pointercancel', endVolDrag);
+        window.removeEventListener('mouseup', endVolDrag);
+        window.removeEventListener('blur', endVolDrag);
+      };
+
+      volSlider.addEventListener('pointerdown', (e) => {
+        ctrl.classList.add('volume-active');
+
+        window.addEventListener('pointerup', endVolDrag);
+        window.addEventListener('pointercancel', endVolDrag);
+        window.addEventListener('mouseup', endVolDrag);
+        window.addEventListener('blur', endVolDrag);
+      });
+
+      volSlider.addEventListener('input', () => {
+        v.volume = volSlider.value / 100;
+        if (v.volume > 0) {
+          v.muted = false;
+        }
+        localStorage.setItem('folio_video_volume', v.volume);
+        localStorage.setItem('folio_video_muted', v.muted);
+        updateVolumeUI();
+      });
+
+      volBtn.onclick = () => {
+        if (v.muted) {
+          v.muted = false;
+          v.volume = lastVolume > 0 ? lastVolume : 0.8;
+        } else {
+          lastVolume = v.volume > 0 ? v.volume : lastVolume;
+          v.muted = true;
+        }
+        localStorage.setItem('folio_video_volume', v.volume);
+        localStorage.setItem('folio_video_muted', v.muted);
+        updateVolumeUI();
+      };
+
+      v.onvolumechange = () => {
+        if (!v.muted && v.volume > 0) {
+          lastVolume = v.volume;
+        }
+        localStorage.setItem('folio_video_volume', v.volume);
+        localStorage.setItem('folio_video_muted', v.muted);
+        updateVolumeUI();
+      };
+      updateVolumeUI(); // init volume UI state
+
+      // Fullscreen compatibility handling (WebKit & Native container toggling)
+      fsBtn.onclick = () => {
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(err => console.error(err));
+        } else {
+          if (layer.requestFullscreen) {
+            layer.requestFullscreen().catch(err => {
+              if (v.requestFullscreen) {
+                v.requestFullscreen().catch(e => console.error(e));
+              } else if (v.webkitEnterFullscreen) {
+                v.webkitEnterFullscreen();
+              }
+            });
+          } else if (v.webkitEnterFullscreen) {
+            v.webkitEnterFullscreen();
+          }
+        }
+      };
+
       layer.appendChild(ctrl);
-      updateAdaptiveGlow(v);
+      
+      // Defer adaptive glow off the critical entry transition frame
+      setTimeout(() => {
+        requestAnimationFrame(() => {
+          if (items[idx]?.path !== item.path) return;
+          updateAdaptiveGlow(v);
+        });
+      }, 50);
     };
     layer.appendChild(v);
     media.appendChild(layer);
@@ -930,24 +1148,31 @@ function show(i, dir = null) {
         viewer.classList.remove('loading');
         const ph = layer.querySelector('.placeholder-thumb');
         if (ph) ph.remove();
-        try {
-            updateAdaptiveGlow(img);
-        } catch (e) {
-            console.error("Adaptive glow error:", e);
-        }
-        if (editPanelOpen) invoke('prepare_edit_preview', { path: item.path }).then(() => loadEditForCurrent()).catch(e => console.error(e));
-        if (overlayVisible) {
+        
+        // Defer CPU-heavy color analytics to unblock visual navigation animations
+        setTimeout(() => {
+          requestAnimationFrame(() => {
+            if (items[idx]?.path !== item.path) return;
             try {
-                drawHistogram(img);
+                updateAdaptiveGlow(img);
             } catch (e) {
-                console.error("Histogram error:", e);
+                console.error("Adaptive glow error:", e);
             }
-            try {
-                drawDominantColors(item);
-            } catch (e) {
-                console.error("Dominant colors error:", e);
+            if (editPanelOpen) invoke('prepare_edit_preview', { path: item.path }).then(() => loadEditForCurrent()).catch(e => console.error(e));
+            if (overlayVisible) {
+                try {
+                    drawHistogram(img);
+                } catch (e) {
+                    console.error("Histogram error:", e);
+                }
+                try {
+                    drawDominantColors(item);
+                } catch (e) {
+                    console.error("Dominant colors error:", e);
+                }
             }
-        }
+          });
+        }, 50);
     };
     img.onload = onImgReady;
     img.onerror = onImgReady;
@@ -1089,7 +1314,7 @@ async function updateAdaptiveGlow(el) {
 }
 
 /* ── Filmstrip ── */
-const THUMB_CONCURRENCY = 12; let thumbQueue = [], thumbActive = 0, thumbMaxSide = 320;
+const THUMB_CONCURRENCY = 4; let thumbQueue = [], thumbActive = 0, thumbMaxSide = 320;
 function enqueueThumb(el, p) { thumbQueue.push({ el, path: p, retries: 0 }); processThumbQueue(); }
 async function processThumbQueue() { while (thumbActive < THUMB_CONCURRENCY && thumbQueue.length > 0) { const j = thumbQueue.shift(); thumbActive++; loadThumb(j).finally(() => { thumbActive--; processThumbQueue(); }); } }
 async function loadThumb({ el, path, retries }) {
@@ -1110,6 +1335,11 @@ async function loadThumb({ el, path, retries }) {
       img.onload = () => img.classList.add('loaded');
       img.onerror = fallback;
       img.src = u;
+    }
+    const v = el.querySelector('video');
+    if (v) {
+      v.poster = u;
+      el.classList.add('loaded');
     }
     preloadedThumbs.set(path, u);
   } catch (err) {
@@ -1610,6 +1840,14 @@ let cursorX = 0, cursorY = 0;
 let targetX = 0, targetY = 0;
 let isHoveringCursor = false;
 let cursorActivated = false;
+let cursorLoopRunning = false;
+
+function wakeCursorLoop() {
+  if (!cursorLoopRunning) {
+    cursorLoopRunning = true;
+    requestAnimationFrame(updateCursorLoop);
+  }
+}
 
 window.addEventListener('mousemove', (e) => {
   targetX = e.clientX;
@@ -1619,35 +1857,67 @@ window.addEventListener('mousemove', (e) => {
   const inTL = !isFullscreen && e.clientX <= 80 && e.clientY <= 40;
   if (useCustomCursor) setTrafficLightHover(inTL);
   
-  isHoveringCursor = !!e.target.closest('button, .thumb, input, select, .welcome-btn, .sidebar-dragbar, .sidebar-toggle, .grid-toggle-btn');
+  isHoveringCursor = !!(
+    e.target.closest('button, .thumb, input, select, .welcome-btn, .sidebar-dragbar, .sidebar-toggle, .grid-toggle-btn, .sidebar-resizer') ||
+    document.querySelector('input[type="range"]:active') ||
+    document.querySelector('.volume-active') ||
+    document.querySelector('.scrubbing-active')
+  );
+  
+  wakeCursorLoop();
 });
 
 document.addEventListener('mouseleave', () => {
   cursorActivated = false;
   if (customCursor) customCursor.style.opacity = 0;
+  wakeCursorLoop();
 });
 
 document.addEventListener('mouseenter', () => {
   cursorActivated = true;
+  wakeCursorLoop();
 });
 
 function updateCursorLoop() {
-  if (useCustomCursor && !trafficLightHover && cursorActivated) {
+  if (!useCustomCursor) {
+    if (customCursor) customCursor.style.opacity = 0;
+    cursorLoopRunning = false;
+    return;
+  }
+  
+  if (!trafficLightHover && cursorActivated) {
+    const dx = targetX - cursorX;
+    const dy = targetY - cursorY;
+    
     // ProMotion continuous lerp interpolation
-    cursorX += (targetX - cursorX) * 0.28;
-    cursorY += (targetY - cursorY) * 0.28;
+    cursorX += dx * 0.28;
+    cursorY += dy * 0.28;
     
     if (customCursor) {
       customCursor.style.opacity = 1;
       customCursor.style.transform = `translate(${cursorX}px, ${cursorY}px)`;
       customCursor.classList.toggle('hovering', isHoveringCursor);
     }
+    
+    // Close enough to destination -> sleep the loop to save energy
+    if (Math.abs(dx) < 0.1 && Math.abs(dy) < 0.1) {
+      cursorX = targetX;
+      cursorY = targetY;
+      if (customCursor) {
+        customCursor.style.transform = `translate(${cursorX}px, ${cursorY}px)`;
+      }
+      cursorLoopRunning = false;
+      return;
+    }
   } else {
     if (customCursor) customCursor.style.opacity = 0;
+    cursorLoopRunning = false;
+    return;
   }
+  
   requestAnimationFrame(updateCursorLoop);
 }
-requestAnimationFrame(updateCursorLoop);
+wakeCursorLoop();
 
 media.addEventListener('wheel', (e) => {
   const img = getActiveImage(); if (!img) return;
@@ -1676,7 +1946,12 @@ media.addEventListener('wheel', (e) => {
 }, { passive: false });
 
 media.addEventListener('mousedown', async (e) => {
-  if (zoom <= 1 && e.button === 0) { if (e.target.closest('video')) return; e.preventDefault(); getCurrentWindow().startDragging(); return; }
+  if (zoom <= 1 && e.button === 0) {
+    if (e.target.closest('video') || e.target.closest('.video-controls')) return;
+    e.preventDefault();
+    getCurrentWindow().startDragging();
+    return;
+  }
   if (zoom > 1) { isDragging = true; startX = e.clientX - panX; startY = e.clientY - panY; }
 });
 window.addEventListener('mousemove', (e) => { if (isDragging) { panX = e.clientX - startX; panY = e.clientY - startY; scheduleUpdate(); } });
@@ -1727,6 +2002,14 @@ window.addEventListener('keydown', (e) => {
     
     if (matchesKey(keybinds.nextImage)) nav(1);
     else if (matchesKey(keybinds.prevImage)) nav(-1);
+    else if (matchesKey(keybinds.playVideo)) {
+      const activeVideo = media.querySelector('.media-layer.media-active video');
+      if (activeVideo) {
+        e.preventDefault();
+        const playBtn = media.querySelector('.media-layer.media-active .v-play-btn');
+        if (playBtn) playBtn.click();
+      }
+    }
     else if (matchesKey(keybinds.editMode)) editToggleBtn.click();
     else if (matchesKey(keybinds.addTag)) { e.preventDefault(); showTagPill(); }
     else if (matchesKey(keybinds.toggleMetadata)) {
@@ -1948,6 +2231,7 @@ if (customCursorCheck) {
     useCustomCursor = e.target.checked;
     localStorage.setItem('folio_custom_cursor', useCustomCursor);
     updateCursorVisibility();
+    wakeCursorLoop();
   });
 }
 
@@ -2298,6 +2582,12 @@ async function buildCatalogContent() {
       v.playsInline = true;
       card.appendChild(v);
       
+      invoke('get_thumbnail', { path: it.path, maxSide: 320 })
+        .then(tp => {
+          v.poster = `folio://localhost/${encodeURIComponent(tp)}`;
+        })
+        .catch(() => {});
+        
       card.addEventListener('mouseenter', () => {
         if (!v.src) v.src = `folio://localhost/${encodeURIComponent(it.path)}`;
         v.play().catch(()=>{});
@@ -2583,13 +2873,7 @@ function applyTagFilter() {
   });
   
   if (items && items.length > 0) {
-    if (activeTagFilter === null) {
-      // Switching back to "All" — reset to first image
-      idx = 0;
-      if (!catalogModeActive) {
-        show(idx);
-      }
-    } else {
+    if (activeTagFilter !== null) {
       // Switching to a specific tag — jump to first matching image
       const currentPath = items[idx]?.path;
       const currentTags = folderTagsCache.get(currentPath) || [];
@@ -2733,10 +3017,12 @@ listen('fs-change', async () => {
       return;
     }
     
+    let oldPathStillExists = false;
     if (oldPath) {
       const newIdx = items.findIndex(it => it.path === oldPath);
       if (newIdx !== -1) {
         idx = newIdx;
+        oldPathStillExists = true;
       } else {
         if (idx >= items.length) idx = Math.max(0, items.length - 1);
       }
@@ -2750,7 +3036,13 @@ listen('fs-change', async () => {
     if (catalogModeActive) {
       buildCatalogContent();
     } else {
-      show(idx);
+      // If the current file still exists, do not call show(idx) to avoid resetting playback/zoom status.
+      // Simply update the active state highlighted in the filmstrip.
+      if (oldPathStillExists) {
+        highlightThumb();
+      } else {
+        show(idx);
+      }
     }
   } catch (e) {
     console.error('Failed to reload on filesystem watcher update:', e);

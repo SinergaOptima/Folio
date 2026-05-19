@@ -48,6 +48,7 @@ struct AppState {
     /// In-memory cache of already resolved thumbnail paths: key is (path_string, max_side), value is thumb_path_string
     resolved_thumbs: RwLock<HashMap<(String, u32), String>>,
     watcher: RwLock<Option<notify::RecommendedWatcher>>,
+    dominant_colors: RwLock<HashMap<String, Vec<String>>>,
 }
 
 #[tauri::command]
@@ -149,7 +150,9 @@ fn setup_watcher(folder_path: &Path, state: &Arc<AppState>, app_handle: tauri::A
                     let app_h = app_handle_clone.clone();
                     
                     tauri::async_runtime::spawn(async move {
-                        let _ = build_index(&folder_p, &state_arc.cache);
+                        if let Ok(index) = build_index(&folder_p, &state_arc.cache) {
+                            *state_arc.index.write() = Some(index);
+                        }
                         let _ = app_h.emit("fs-change", ());
                     });
                 }
@@ -734,18 +737,30 @@ async fn delete_physical_file(path: String, state: State<'_, Arc<AppState>>) -> 
 }
 
 #[tauri::command]
-async fn get_dominant_colors(path: String) -> Result<Vec<String>, String> {
+async fn get_dominant_colors(path: String, state: State<'_, Arc<AppState>>) -> Result<Vec<String>, String> {
+    {
+        let cache = state.dominant_colors.read();
+        if let Some(colors) = cache.get(&path) {
+            return Ok(colors.clone());
+        }
+    }
+    
     let p = std::path::PathBuf::from(&path);
     if media_core::is_video_path(&p) {
         return Ok(vec![]);
     }
-    tauri::async_runtime::spawn_blocking(move || {
+    let state_arc = state.inner().clone();
+    let path_clone = path.clone();
+    let colors = tauri::async_runtime::spawn_blocking(move || {
         let img = media_core::open_image(&p).map_err(|e| e.to_string())?;
         let colors = media_core::extract_dominant_colors(&img, 5);
-        Ok(colors)
+        Ok::<Vec<String>, String>(colors)
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())??;
+    
+    state_arc.dominant_colors.write().insert(path_clone, colors.clone());
+    Ok(colors)
 }
 
 #[tauri::command]
@@ -930,6 +945,7 @@ fn main() {
         recent_folders: RwLock::new(load_recent_folders()),
         resolved_thumbs: RwLock::new(HashMap::new()),
         watcher: RwLock::new(None),
+        dominant_colors: RwLock::new(HashMap::new()),
     });
 
     let mut builder = tauri::Builder::default()
@@ -963,7 +979,32 @@ fn main() {
             let file_len = file_meta.len();
             let mime = mime_guess::from_path(&path).first_or_octet_stream();
             let is_video = is_video_path(&path);
-            let range_header = request.headers().get("range").and_then(|v| v.to_str().ok()).map(|s| s.to_string());
+            
+            let modified = file_meta.modified()
+                .map(|t| t.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0))
+                .unwrap_or(0);
+            let etag = format!("W/\"{:x}-{:x}\"", file_len, modified);
+
+            // ETag cache validation
+            if let Some(if_none_match) = request.headers().get("if-none-match").and_then(|v| v.to_str().ok()) {
+                if if_none_match == etag {
+                    return tauri::http::Response::builder()
+                        .status(304)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(vec![]).unwrap();
+                }
+            }
+
+            let range_header = request.headers().get("range")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string())
+                .or_else(|| {
+                    if is_video {
+                        Some("bytes=0-".to_string())
+                    } else {
+                        None
+                    }
+                });
 
             if is_video && file_len > 0 {
                 if let Some(ref range_val) = range_header {
@@ -998,6 +1039,7 @@ fn main() {
                         .header("Access-Control-Allow-Origin", "*")
                         .header("Content-Type", mime.as_ref())
                         .header("Cache-Control", cache_val)
+                        .header("ETag", etag)
                         .header("Content-Length", data.len().to_string())
                         .body(data).unwrap()
                 }

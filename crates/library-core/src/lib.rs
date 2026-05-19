@@ -269,16 +269,49 @@ impl LibraryCache {
     }
 
     pub fn ensure_thumbnail(&self, path: &Path, max_side: u32) -> Result<PathBuf> {
-        // Video files cannot be thumbnailed by the image crate
-        if is_video_path(path) {
-            anyhow::bail!("cannot generate thumbnail for video: {}", path.display());
-        }
-
         let thumb_path = self.thumbnail_path(path, max_side)?;
         if thumb_path.exists() {
             return Ok(thumb_path);
         }
         let tmp_path = thumb_path.with_extension("tmp");
+
+        if is_video_path(path) {
+            #[cfg(target_os = "macos")]
+            {
+                let temp_dir = std::env::temp_dir();
+                let output = std::process::Command::new("qlmanage")
+                    .arg("-t")
+                    .arg("-s")
+                    .arg(max_side.to_string())
+                    .arg("-o")
+                    .arg(&temp_dir)
+                    .arg(path)
+                    .output();
+                
+                if let Ok(out) = output {
+                    if out.status.success() {
+                        let filename = path.file_name().ok_or_else(|| anyhow::anyhow!("no filename for video"))?;
+                        let generated_png = temp_dir.join(format!("{}.png", filename.to_string_lossy()));
+                        if generated_png.exists() {
+                            let img = image::open(&generated_png)
+                                .with_context(|| format!("failed to open generated video frame at {}", generated_png.display()))?;
+                            let mut file = std::fs::File::create(&tmp_path)
+                                .with_context(|| format!("failed to create temp file at {}", tmp_path.display()))?;
+                            let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut file, 85);
+                            image::DynamicImage::ImageRgba8(img.to_rgba8())
+                                .write_with_encoder(encoder)
+                                .with_context(|| format!("failed to write jpeg to {}", tmp_path.display()))?;
+                            let _ = std::fs::remove_file(&generated_png);
+                            
+                            std::fs::rename(&tmp_path, &thumb_path)
+                                .with_context(|| format!("failed to finalize thumbnail {}", thumb_path.display()))?;
+                            return Ok(thumb_path);
+                        }
+                    }
+                }
+            }
+            anyhow::bail!("cannot generate thumbnail for video: {}", path.display());
+        }
 
         if media_core::can_use_sips(path) {
             // High-performance native thumbnailing
@@ -341,6 +374,7 @@ impl LibraryCache {
             let orig_idx = paths.iter().position(|p| p == path).unwrap_or(0);
             (orig_idx as isize - active_index as isize).abs()
         });
+        sorted_paths.truncate(30);
         sorted_paths.par_iter().for_each(|path| {
             let _ = self.ensure_thumbnail(path, max_side);
         });
