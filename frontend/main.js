@@ -127,7 +127,13 @@ app.innerHTML = `
       <canvas class="editorial-histogram" id="histogramCanvas" width="220" height="56" aria-hidden="true"></canvas>
       <div class="editorial-palette" id="editorialPalette" style="margin-top: 16px; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 12px;">
         <span class="editorial-stat-label">Dominant Palette</span>
-        <div id="paletteChips" style="display: flex; gap: 8px; margin-top: 4px;"></div>
+        <div id="paletteChips" style="display: flex; gap: 8px; margin-top: 4px;">
+          <div class="palette-chip" style="display: none; width: 20px; height: 20px; border-radius: 50%; cursor: pointer; border: 1px solid rgba(255,255,255,0.25); transition: transform var(--transition-dur-fast) var(--ease-spring), box-shadow var(--transition-dur-fast) var(--ease-spring);"></div>
+          <div class="palette-chip" style="display: none; width: 20px; height: 20px; border-radius: 50%; cursor: pointer; border: 1px solid rgba(255,255,255,0.25); transition: transform var(--transition-dur-fast) var(--ease-spring), box-shadow var(--transition-dur-fast) var(--ease-spring);"></div>
+          <div class="palette-chip" style="display: none; width: 20px; height: 20px; border-radius: 50%; cursor: pointer; border: 1px solid rgba(255,255,255,0.25); transition: transform var(--transition-dur-fast) var(--ease-spring), box-shadow var(--transition-dur-fast) var(--ease-spring);"></div>
+          <div class="palette-chip" style="display: none; width: 20px; height: 20px; border-radius: 50%; cursor: pointer; border: 1px solid rgba(255,255,255,0.25); transition: transform var(--transition-dur-fast) var(--ease-spring), box-shadow var(--transition-dur-fast) var(--ease-spring);"></div>
+          <div class="palette-chip" style="display: none; width: 20px; height: 20px; border-radius: 50%; cursor: pointer; border: 1px solid rgba(255,255,255,0.25); transition: transform var(--transition-dur-fast) var(--ease-spring), box-shadow var(--transition-dur-fast) var(--ease-spring);"></div>
+        </div>
       </div>
       <div class="editorial-gps" id="edGps" style="margin-top: 12px; display: none; flex-direction: column; gap: 6px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 12px;">
         <span class="editorial-stat-label">Location</span>
@@ -346,12 +352,95 @@ app.innerHTML = `
 const $ = id => document.getElementById(id);
 const welcome = $('welcome'), welcomeBg = $('welcomeBg'), sidebar = $('sidebar'), sidebarResizer = $('sidebarResizer'), sidebarToggle = $('sidebarToggle'), viewer = $('viewer'), media = $('media'), mediaLoader = $('mediaLoader'), filmstrip = $('filmstrip'), breadcrumbs = $('breadcrumbs'), gridToggleBtn = $('gridToggleBtn'), counter = $('counter'), fname = $('fname'), dims = $('dims'), badge = $('badge'), edOverlay = $('editorialOverlay'), edCamera = $('edCamera'), edAperture = $('edAperture'), edShutter = $('edShutter'), edIso = $('edIso'), edFocal = $('edFocal'), edTechData = $('edTechData'), backdropGlow = $('backdropGlow'), editPanel = $('editPanel'), editToggleBtn = $('editToggleBtn'), editCloseBtn = $('editCloseBtn'), editResetBtn = $('editResetBtn'), editExportBtn = $('editExportBtn'), rotateBtn = $('rotateBtn'), flipHBtn = $('flipHBtn'), flipVBtn = $('flipVBtn'), cropBtn = $('cropBtn'), customCursor = $('customCursor'), customCursorCheck = $('customCursorCheck'), dropzoneGlow = $('dropzoneGlow'), zoomSlider = $('zoomSlider'), zoomLabel = $('zoomLabel'), zoomReset = $('zoomReset'), fullscreenBtn = $('fullscreenBtn'), imageFsExit = $('imageFsExit'), sortSelect = $('sortSelect'), zoomSensSlider = $('zoomSensSlider'), themeSelect = $('themeSelect'), cinematicCheck = $('cinematicCheck'), recentFoldersCheck = $('recentFoldersCheck'), stripMetadataCheck = $('stripMetadataCheck'), vibrancyCheck = $('vibrancyCheck'), soundVolumeSlider = $('soundVolumeSlider'), soundVolumeVal = $('soundVolumeVal'), catalogGrid = $('catalogGrid'), catalogContent = $('catalogContent'), catalogTitle = $('catalogTitle'), catalogNewFolderBtn = $('catalogNewFolderBtn'), catalogDuplicatesBtn = $('catalogDuplicatesBtn'), catalogCloseBtn = $('catalogCloseBtn'), tagFilterPanel = $('tagFilterPanel'), tagFilterList = $('tagFilterList'), sidebarCatalogBtn = $('sidebarCatalogBtn'), edGps = $('edGps'), gpsChip = $('gpsChip'), mapModal = $('mapModal'), mapCloseBtn = $('mapCloseBtn'), mapIframe = $('mapIframe'), compareBtn = $('compareBtn'), transcodeHud = $('transcodeHud'), transcodeCount = $('transcodeCount'), transcodeClose = $('transcodeClose'), colorBlindSelect = $('colorBlindSelect'), watermarkInput = $('watermarkInput');
 
+// Utility: Debounce for disk-bound I/O reduction (Finding 3)
+function debounce(fn, delay) {
+  let timer = null;
+  return function(...args) {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn.apply(this, args), delay);
+  };
+}
+
+const saveVideoSettings = debounce((volume, muted) => {
+  localStorage.setItem('folio_video_volume', volume);
+  localStorage.setItem('folio_video_muted', muted);
+}, 250);
+
+// Inline Web Worker for off-thread image analytics (Finding 1)
+const analysisWorkerCode = `
+  self.onmessage = function(e) {
+    const data = e.data.data;
+    const rB = new Uint32Array(256);
+    const gB = new Uint32Array(256);
+    const bB = new Uint32Array(256);
+    const lB = new Uint32Array(256);
+    
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i+1];
+      const b = data[i+2];
+      rB[r]++;
+      gB[g]++;
+      bB[b]++;
+      lB[Math.round(0.299 * r + 0.587 * g + 0.114 * b)]++;
+    }
+    
+    let peak = 1;
+    for (let i = 0; i < 256; i++) {
+      if (rB[i] > peak) peak = rB[i];
+      if (gB[i] > peak) peak = gB[i];
+      if (bB[i] > peak) peak = bB[i];
+    }
+    
+    self.postMessage({ rB, gB, bB, lB, peak }, [rB.buffer, gB.buffer, bB.buffer, lB.buffer]);
+  };
+`;
+const analysisWorkerBlob = new Blob([analysisWorkerCode], { type: 'application/javascript' });
+const analysisWorker = new Worker(URL.createObjectURL(analysisWorkerBlob));
+
+// Unified Folio State & Settings Store (Finding 12)
+const FolioState = {
+  isSliderActive: false,
+  isVolumeActive: false,
+  isScrubbingActive: false,
+  activeThumbEl: null,
+  catalogVisibleCount: 100,
+
+  settings: {
+    get currentSort() { return currentSort; },
+    set currentSort(v) { currentSort = v; localStorage.setItem('folio_sort', v); },
+    get zoomSens() { return zoomSens; },
+    set zoomSens(v) { zoomSens = v; localStorage.setItem('folio_zoom_sens', v); },
+    get currentTheme() { return currentTheme; },
+    set currentTheme(v) { currentTheme = v; localStorage.setItem('folio_theme', v); },
+    get cinematicEnabled() { return cinematicEnabled; },
+    set cinematicEnabled(v) { cinematicEnabled = v; localStorage.setItem('folio_cinematic', v); },
+    get useCustomCursor() { return useCustomCursor; },
+    set useCustomCursor(v) { useCustomCursor = v; localStorage.setItem('folio_custom_cursor', v); },
+    get showRecentFolders() { return showRecentFolders; },
+    set showRecentFolders(v) { showRecentFolders = v; localStorage.setItem('folio_show_recents', v); },
+    get stripMetadataEnabled() { return stripMetadataEnabled; },
+    set stripMetadataEnabled(v) { stripMetadataEnabled = v; localStorage.setItem('folio_strip_metadata', v); },
+    get soundVolume() { return soundVolume; },
+    set soundVolume(v) { soundVolume = v; localStorage.setItem('folio_sound_volume', v); },
+    get vibrancyEnabled() { return vibrancyEnabled; },
+    set vibrancyEnabled(v) { vibrancyEnabled = v; localStorage.setItem('folio_vibrancy', v); },
+    get gridView() { return gridView; },
+    set gridView(v) { gridView = v; localStorage.setItem('folio_grid_view', v); },
+    get activeColorBlindMode() { return activeColorBlindMode; },
+    set activeColorBlindMode(v) { activeColorBlindMode = v; localStorage.setItem('folio_color_blind', v); },
+    get activeWatermark() { return activeWatermark; },
+    set activeWatermark(v) { activeWatermark = v; localStorage.setItem('folio_watermark', v); }
+  }
+};
+
 let catalogModeActive = false;
 let compareModeActive = false;
 let compareClipPct = 50;
 let selectedCatalogPaths = new Set();
 let gridThumbSize = 160;
 let activeTagFilter = null;
+let catalogObserver = null;
 
 /* ── Settings & State ── */
 let currentSort = localStorage.getItem('folio_sort') || 'name';
@@ -375,6 +464,20 @@ let editPreviewImg = null;
 const editMap = new Map();
 const preloadedThumbs = new Map();
 const preloadCache = new Map();
+
+// Bind existing sessions properties to FolioState dynamically
+Object.defineProperties(FolioState, {
+  idx: { get() { return idx; }, set(val) { idx = val; } },
+  items: { get() { return items; }, set(val) { items = val; } },
+  catalogModeActive: { get() { return catalogModeActive; }, set(val) { catalogModeActive = val; } },
+  compareModeActive: { get() { return compareModeActive; }, set(val) { compareModeActive = val; } },
+  compareClipPct: { get() { return compareClipPct; }, set(val) { compareClipPct = val; } },
+  selectedCatalogPaths: { get() { return selectedCatalogPaths; }, set(val) { selectedCatalogPaths = val; } },
+  gridThumbSize: { get() { return gridThumbSize; }, set(val) { gridThumbSize = val; } },
+  activeTagFilter: { get() { return activeTagFilter; }, set(val) { activeTagFilter = val; } },
+  trafficLightHover: { get() { return trafficLightHover; }, set(val) { trafficLightHover = val; } },
+  editPanelOpen: { get() { return editPanelOpen; }, set(val) { editPanelOpen = val; } }
+});
 
 const defaultKeybinds = { nextImage: 'ArrowRight', prevImage: 'ArrowLeft', resetZoom: '0', toggleMetadata: 'i', playVideo: ' ', modifierZoom: 'Shift', modifierPan: 'Shift', toggleZen: 'z', toggleSidebar: 'b', toggleFullscreen: 'f', editMode: 'e', addTag: 't', toggleCatalog: 'g' };
 let keybinds = { ...defaultKeybinds, ...JSON.parse(localStorage.getItem('folio_keybinds') || '{}') };
@@ -497,6 +600,7 @@ function applyTheme(theme) {
 /* ── Tooltips ── */
 let tooltipEl = null;
 function initTooltips() {
+  if (tooltipEl) return;
   tooltipEl = document.createElement('div');
   tooltipEl.className = 'folio-tooltip';
   document.body.appendChild(tooltipEl);
@@ -522,8 +626,77 @@ function initTooltips() {
     
     tooltipEl.classList.add('visible');
   });
+
+  window.addEventListener('pointerdown', (e) => {
+    if (tooltipEl) tooltipEl.classList.remove('visible');
+    const targetRange = e.target.closest('input[type="range"]');
+    if (targetRange) {
+      FolioState.isSliderActive = true;
+    }
+  });
+
+  window.addEventListener('pointerup', () => {
+    FolioState.isSliderActive = false;
+  });
+
+  window.addEventListener('pointercancel', () => {
+    FolioState.isSliderActive = false;
+  });
 }
 initTooltips();
+
+function renderMediaError(layer, item, onRetry) {
+  layer.innerHTML = '';
+  
+  const errCard = document.createElement('div');
+  errCard.className = 'glassmorphic-error-card';
+  errCard.style.cssText = `
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 32px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+    max-width: 400px;
+    text-align: center;
+    color: var(--text-primary);
+    margin: auto;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    animation: fadeIn var(--transition-dur-normal) var(--ease-spring);
+  `;
+  
+  errCard.innerHTML = `
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#ff4b4b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+      <line x1="12" y1="9" x2="12" y2="13"/>
+      <line x1="12" y1="17" x2="12.01" y2="17"/>
+    </svg>
+    <div style="font-weight: 600; font-size: 15px; margin-top: 8px;">Failed to Load Media</div>
+    <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.4; word-break: break-all; margin-top: 4px;">
+      ${item.path.split('/').pop()}
+    </div>
+    <button class="catalog-btn retry-btn" style="margin-top: 16px; border-color: rgba(255,75,75,0.25); background: rgba(255,75,75,0.05); color: #ff6b6b; cursor: pointer; outline: none;">
+      Retry Loading
+    </button>
+  `;
+  
+  const retryBtn = errCard.querySelector('.retry-btn');
+  retryBtn.onclick = (e) => {
+    e.stopPropagation();
+    onRetry();
+  };
+  
+  layer.appendChild(errCard);
+}
 
 function makeEditable(element, fieldKey) {
   if (!element) return;
@@ -907,6 +1080,15 @@ function show(i, dir = null) {
     const v = document.createElement('video');
     v.className = 'media-content';
     v.autoplay = true; v.loop = true; v.playsInline = true; v.src = src;
+
+    v.onerror = () => {
+      viewer.classList.remove('loading');
+      renderMediaError(layer, item, () => {
+        v.src = '';
+        v.src = src + '?retry=' + Date.now();
+      });
+    };
+
     v.onloadeddata = () => {
       v.classList.add('loaded');
       const ctrl = document.createElement('div');
@@ -991,6 +1173,7 @@ function show(i, dir = null) {
         if (isScrubbing) {
           isScrubbing = false;
           ctrl.classList.remove('scrubbing-active');
+          FolioState.isScrubbingActive = false;
           if (v.duration) {
             v.currentTime = (progress.value / 100) * v.duration;
           }
@@ -1009,6 +1192,7 @@ function show(i, dir = null) {
         wasPlayingBeforeScrub = !v.paused;
         v.pause();
         ctrl.classList.add('scrubbing-active');
+        FolioState.isScrubbingActive = true;
 
         window.addEventListener('pointerup', endScrub);
         window.addEventListener('pointercancel', endScrub);
@@ -1058,6 +1242,7 @@ function show(i, dir = null) {
 
       const endVolDrag = (e) => {
         ctrl.classList.remove('volume-active');
+        FolioState.isVolumeActive = false;
 
         window.removeEventListener('pointerup', endVolDrag);
         window.removeEventListener('pointercancel', endVolDrag);
@@ -1067,6 +1252,7 @@ function show(i, dir = null) {
 
       volSlider.addEventListener('pointerdown', (e) => {
         ctrl.classList.add('volume-active');
+        FolioState.isVolumeActive = true;
 
         window.addEventListener('pointerup', endVolDrag);
         window.addEventListener('pointercancel', endVolDrag);
@@ -1079,8 +1265,7 @@ function show(i, dir = null) {
         if (v.volume > 0) {
           v.muted = false;
         }
-        localStorage.setItem('folio_video_volume', v.volume);
-        localStorage.setItem('folio_video_muted', v.muted);
+        saveVideoSettings(v.volume, v.muted);
         updateVolumeUI();
       });
 
@@ -1092,8 +1277,7 @@ function show(i, dir = null) {
           lastVolume = v.volume > 0 ? v.volume : lastVolume;
           v.muted = true;
         }
-        localStorage.setItem('folio_video_volume', v.volume);
-        localStorage.setItem('folio_video_muted', v.muted);
+        saveVideoSettings(v.volume, v.muted);
         updateVolumeUI();
       };
 
@@ -1101,8 +1285,7 @@ function show(i, dir = null) {
         if (!v.muted && v.volume > 0) {
           lastVolume = v.volume;
         }
-        localStorage.setItem('folio_video_volume', v.volume);
-        localStorage.setItem('folio_video_muted', v.muted);
+        saveVideoSettings(v.volume, v.muted);
         updateVolumeUI();
       };
       updateVolumeUI(); // init volume UI state
@@ -1175,7 +1358,21 @@ function show(i, dir = null) {
         }, 50);
     };
     img.onload = onImgReady;
-    img.onerror = onImgReady;
+    img.onerror = () => {
+        viewer.classList.remove('loading');
+        const ph = layer.querySelector('.placeholder-thumb');
+        if (ph) ph.remove();
+        renderMediaError(layer, item, () => {
+            img.src = '';
+            if (isNative) {
+                img.src = src + '?retry=' + Date.now();
+            } else {
+                invoke('get_full_image', { path: item.path })
+                    .then(p => { img.src = `folio://localhost/${encodeURIComponent(p)}?retry=${Date.now()}`; })
+                    .catch(() => { img.src = src + '?retry=' + Date.now(); });
+            }
+        });
+    };
 
     const cached = preloadCache.get(item.path);
     if (cached && cached.complete && cached.naturalWidth > 0) {
@@ -1188,7 +1385,10 @@ function show(i, dir = null) {
         } else {
             invoke('get_full_image', { path: item.path })
                 .then(p => { img.src = `folio://localhost/${encodeURIComponent(p)}`; })
-                .catch(() => { img.src = src; });
+                .catch(() => {
+                    // Trigger grace fallback directly if full image retrieval fails
+                    img.onerror();
+                });
         }
     }
     layer.appendChild(img);
@@ -1361,7 +1561,12 @@ function buildFilmstrip() {
   gridToggleBtn?.classList.toggle('active', gridView);
   
   items.forEach((it, i) => {
-    const d = document.createElement('div'); d.className = i === idx ? 'thumb active' : 'thumb'; d.dataset.path = it.path;
+    const d = document.createElement('div');
+    d.className = i === idx ? 'thumb active' : 'thumb';
+    d.dataset.path = it.path;
+    if (i === idx) {
+      FolioState.activeThumbEl = d;
+    }
     d.onclick = () => show(i, i === idx ? 0 : (i > idx ? 1 : -1));
     d.oncontextmenu = (e) => showContextMenu(e, it.path, i);
     
@@ -1399,15 +1604,15 @@ function buildFilmstrip() {
 }
 
 function highlightThumb() {
-  const activePath = items[idx]?.path;
-  document.querySelectorAll('.thumb').forEach(t => {
-    if (t.dataset.path === activePath) {
-      t.classList.add('active');
-      filmstrip.scrollTo({ top: t.offsetTop - filmstrip.clientHeight / 2 + t.clientHeight / 2, behavior: 'smooth' });
-    } else {
-      t.classList.remove('active');
-    }
-  });
+  if (FolioState.activeThumbEl) {
+    FolioState.activeThumbEl.classList.remove('active');
+  }
+  const targetThumb = filmstrip.children[idx];
+  if (targetThumb) {
+    targetThumb.classList.add('active');
+    FolioState.activeThumbEl = targetThumb;
+    filmstrip.scrollTo({ top: targetThumb.offsetTop - filmstrip.clientHeight / 2 + targetThumb.clientHeight / 2, behavior: 'smooth' });
+  }
 }
 
 /* ── Simple Edit Engine ── */
@@ -1859,9 +2064,9 @@ window.addEventListener('mousemove', (e) => {
   
   isHoveringCursor = !!(
     e.target.closest('button, .thumb, input, select, .welcome-btn, .sidebar-dragbar, .sidebar-toggle, .grid-toggle-btn, .sidebar-resizer') ||
-    document.querySelector('input[type="range"]:active') ||
-    document.querySelector('.volume-active') ||
-    document.querySelector('.scrubbing-active')
+    FolioState.isSliderActive ||
+    FolioState.isVolumeActive ||
+    FolioState.isScrubbingActive
   );
   
   wakeCursorLoop();
@@ -1926,7 +2131,8 @@ media.addEventListener('wheel', (e) => {
     // Native Trackpad Pinch-to-Zoom
     e.preventDefault();
     const scale = Math.exp(-e.deltaY * 0.01);
-    setZoom(zoom * scale, e.clientX - media.offsetWidth/2, e.clientY - media.offsetHeight/2);
+    const rect = media.getBoundingClientRect();
+    setZoom(zoom * scale, e.clientX - (rect.left + rect.width / 2), e.clientY - (rect.top + rect.height / 2));
     return;
   }
 
@@ -1935,7 +2141,8 @@ media.addEventListener('wheel', (e) => {
     // Keyboard-modifier Scroll Zoom
     e.preventDefault();
     const scale = Math.exp(-(e.deltaY || e.deltaX) * 0.001 * (zoomSens / 5));
-    setZoom(zoom * scale, e.clientX - media.offsetWidth/2, e.clientY - media.offsetHeight/2);
+    const rect = media.getBoundingClientRect();
+    setZoom(zoom * scale, e.clientX - (rect.left + rect.width / 2), e.clientY - (rect.top + rect.height / 2));
   } else if (zoom > 1) {
     // Fluid 2D Panning when zoomed in
     e.preventDefault();
@@ -2106,48 +2313,73 @@ function sortItems() {
 const histogramCanvas = $('histogramCanvas'), histCtx = histogramCanvas?.getContext('2d'), histSample = document.createElement('canvas'), histSampleCtx = histSample.getContext('2d', { willReadFrequently: true });
 histSample.width = 256; histSample.height = 256;
 function clearHistogram() { if (histCtx) histCtx.clearRect(0, 0, histogramCanvas.width, histogramCanvas.height); }
+
+let currentHistogramTaskId = 0;
 function drawHistogram(imgEl) {
-  if (!histCtx || !imgEl) return; const W = histogramCanvas.width, H = histogramCanvas.height;
-  try { histSampleCtx.drawImage(imgEl, 0, 0, 256, 256); } catch (e) { return; }
-  const d = histSampleCtx.getImageData(0, 0, 256, 256).data, rB = new Uint32Array(256), gB = new Uint32Array(256), bB = new Uint32Array(256), lB = new Uint32Array(256);
-  for (let i = 0; i < d.length; i += 4) { rB[d[i]]++; gB[d[i+1]]++; bB[d[i+2]]++; lB[Math.round(0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2])]++; }
-  let peak = 1; for (let i = 0; i < 256; i++) peak = Math.max(peak, rB[i], gB[i], bB[i]);
-  histCtx.clearRect(0, 0, W, H);
-  const drawC = (buckets, color) => { histCtx.beginPath(); histCtx.moveTo(0, H); for (let i = 0; i < 256; i++) histCtx.lineTo((i/255)*W, H - (buckets[i]/peak)*H); histCtx.lineTo(W, H); histCtx.fillStyle = color; histCtx.fill(); };
-  drawC(rB, 'rgba(255,75,75,0.4)'); drawC(gB, 'rgba(75,210,100,0.4)'); drawC(bB, 'rgba(75,130,255,0.4)'); drawC(lB, 'rgba(255,255,255,0.65)');
+  if (!histCtx || !imgEl) return;
+  const W = histogramCanvas.width, H = histogramCanvas.height;
+  try {
+    histSampleCtx.drawImage(imgEl, 0, 0, 256, 256);
+  } catch (e) {
+    return;
+  }
+  const imgData = histSampleCtx.getImageData(0, 0, 256, 256);
+  const taskId = ++currentHistogramTaskId;
+
+  analysisWorker.onmessage = function(e) {
+    if (taskId !== currentHistogramTaskId) return;
+    const { rB, gB, bB, lB, peak } = e.data;
+    histCtx.clearRect(0, 0, W, H);
+    const drawC = (buckets, color) => {
+      histCtx.beginPath();
+      histCtx.moveTo(0, H);
+      for (let i = 0; i < 256; i++) {
+        histCtx.lineTo((i/255)*W, H - (buckets[i]/peak)*H);
+      }
+      histCtx.lineTo(W, H);
+      histCtx.fillStyle = color;
+      histCtx.fill();
+    };
+    drawC(rB, 'rgba(255,75,75,0.4)');
+    drawC(gB, 'rgba(75,210,100,0.4)');
+    drawC(bB, 'rgba(75,130,255,0.4)');
+    drawC(lB, 'rgba(255,255,255,0.65)');
+  };
+
+  analysisWorker.postMessage({ data: imgData.data }, [imgData.data.buffer]);
 }
 
 async function drawDominantColors(item) {
   const container = document.getElementById('paletteChips');
   if (!container) return;
-  container.innerHTML = '';
+  
+  const chips = container.querySelectorAll('.palette-chip');
+  chips.forEach(chip => {
+    chip.style.display = 'none';
+  });
+
   if (!item || !item.path) return;
   
   try {
     const colors = await invoke('get_dominant_colors', { path: item.path });
-    container.innerHTML = '';
-    colors.forEach(color => {
-      const chip = document.createElement('div');
-      chip.className = 'palette-chip';
-      chip.style.width = '20px';
-      chip.style.height = '20px';
-      chip.style.borderRadius = '50%';
+    colors.forEach((color, i) => {
+      if (i >= chips.length) return;
+      const chip = chips[i];
+      chip.style.display = 'block';
       chip.style.background = color;
-      chip.style.cursor = 'pointer';
-      chip.style.border = '1px solid rgba(255,255,255,0.25)';
-      chip.style.transition = 'transform 0.15s ease, box-shadow 0.15s ease';
       chip.setAttribute('data-tooltip', `Copy: ${color}`);
       
-      chip.addEventListener('mouseenter', () => {
+      chip.onmouseenter = () => {
         chip.style.transform = 'scale(1.25)';
         chip.style.boxShadow = `0 0 6px ${color}`;
-      });
-      chip.addEventListener('mouseleave', () => {
+      };
+      chip.onmouseleave = () => {
         chip.style.transform = 'scale(1)';
         chip.style.boxShadow = 'none';
-      });
+      };
       
-      chip.addEventListener('click', async () => {
+      chip.onclick = async (e) => {
+        e.stopPropagation();
         try {
           await navigator.clipboard.writeText(color);
           showToast(`Copied ${color} to clipboard!`);
@@ -2158,11 +2390,8 @@ async function drawDominantColors(item) {
         } catch (err) {
           showToast('Failed to copy color to clipboard');
         }
-      });
-      
-      container.appendChild(chip);
+      };
     });
-    initTooltips();
   } catch (e) {
     console.error('Failed to get dominant colors:', e);
   }
@@ -2525,13 +2754,12 @@ function toggleCatalogView(active) {
   }
 }
 
-async function buildCatalogContent() {
-  catalogContent.innerHTML = '';
-  if (!items || items.length === 0) return;
+function renderCatalogChunk(startIndex, count) {
+  const endIndex = Math.min(startIndex + count, items.length);
+  const fragment = document.createDocumentFragment();
   
-  catalogTitle.textContent = '';
-  
-  items.forEach((it, i) => {
+  for (let i = startIndex; i < endIndex; i++) {
+    const it = items[i];
     const card = document.createElement('div');
     card.className = 'catalog-card';
     card.dataset.path = it.path;
@@ -2544,6 +2772,12 @@ async function buildCatalogContent() {
       const color = duplicateGroupsCache.get(it.path);
       card.style.borderColor = color;
       card.style.boxShadow = `0 0 0 3px ${color}`;
+    }
+    
+    if (activeTagFilter !== null) {
+      const tags = folderTagsCache.get(it.path) || [];
+      const matches = tags.some(t => t.name === activeTagFilter);
+      card.classList.toggle('hidden-by-filter', !matches);
     }
     
     const checkOverlay = document.createElement('div');
@@ -2619,8 +2853,58 @@ async function buildCatalogContent() {
     
     info.appendChild(title);
     card.appendChild(info);
-    catalogContent.appendChild(card);
-  });
+    fragment.appendChild(card);
+  }
+  
+  catalogContent.appendChild(fragment);
+  
+  if (endIndex < items.length) {
+    let sentinel = catalogContent.querySelector('.catalog-sentinel');
+    if (!sentinel) {
+      sentinel = document.createElement('div');
+      sentinel.className = 'catalog-sentinel';
+      sentinel.style.height = '1px';
+      sentinel.style.gridColumn = '1 / -1';
+    }
+    catalogContent.appendChild(sentinel);
+    
+    if (!catalogObserver) {
+      catalogObserver = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting) {
+          const currentCount = catalogContent.querySelectorAll('.catalog-card').length;
+          if (currentCount < items.length) {
+            renderCatalogChunk(currentCount, 100);
+          } else {
+            catalogObserver.disconnect();
+            catalogObserver = null;
+            const s = catalogContent.querySelector('.catalog-sentinel');
+            if (s) s.remove();
+          }
+        }
+      }, { root: catalogContent, rootMargin: '200px' });
+    }
+    catalogObserver.observe(sentinel);
+  } else {
+    const sentinel = catalogContent.querySelector('.catalog-sentinel');
+    if (sentinel) sentinel.remove();
+    if (catalogObserver) {
+      catalogObserver.disconnect();
+      catalogObserver = null;
+    }
+  }
+}
+
+async function buildCatalogContent() {
+  if (catalogObserver) {
+    catalogObserver.disconnect();
+    catalogObserver = null;
+  }
+  catalogContent.innerHTML = '';
+  if (!items || items.length === 0) return;
+  
+  catalogTitle.textContent = '';
+  
+  renderCatalogChunk(0, 100);
 }
 
 function showNewFolderModal() {

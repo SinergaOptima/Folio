@@ -17,6 +17,8 @@ serde_json = "1.0"
 dirs = { workspace = true }
 library-core = { path = "../crates/library-core" }
 media-core = { path = "../crates/media-core" }
+rodio = { workspace = true }
+lru = { workspace = true }
 anyhow = { workspace = true }
 image = { workspace = true, features = ["webp"] }
 parking_lot = { workspace = true }

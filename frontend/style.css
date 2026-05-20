@@ -19,6 +19,9 @@
   --modal-bg: rgba(18, 18, 20, 0.88);
   --input-bg: rgba(255, 255, 255, 0.06);
   --overlay-bg: rgba(0, 0, 0, 0.45);
+  --transition-dur-fast: 0.15s;
+  --transition-dur-normal: 0.28s;
+  --transition-dur-slow: 0.45s;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -169,7 +172,9 @@ body {
 .filmstrip.grid-view .thumb { aspect-ratio: 1 / 1; width: 100%; height: auto; }
 
 .thumb {
- width: 100%; aspect-ratio: 16/10; border-radius: 6px; overflow: hidden; cursor: pointer; position: relative; opacity: 0.35; transition: opacity 0.5s var(--ease-smooth), transform 0.5s var(--ease-expo), border-color 0.3s ease, box-shadow 0.4s ease; flex-shrink: 0; border: 1.5px solid transparent; background: rgba(255,255,255,0.02); }
+  content-visibility: auto;
+  contain-intrinsic-size: 120px 75px;
+  width: 100%; aspect-ratio: 16/10; border-radius: 6px; overflow: hidden; cursor: pointer; position: relative; opacity: 0.35; transition: opacity 0.5s var(--ease-smooth), transform 0.5s var(--ease-expo), border-color 0.3s ease, box-shadow 0.4s ease; flex-shrink: 0; border: 1.5px solid transparent; background: rgba(255,255,255,0.02); }
 .thumb::before { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.04), transparent); transform: translateX(-100%); animation: thumbShimmer 1.5s ease-in-out infinite; pointer-events: none; z-index: 1; }
 @keyframes thumbShimmer { 100% { transform: translateX(100%); } }
 .thumb:hover { opacity: 0.7; transform: scale(1.02); }
@@ -196,11 +201,11 @@ body {
 .viewer-bg-base { position: absolute; inset: 0; background: #000; z-index: 0; }
 .backdrop-glow {
   position: absolute;
-  inset: -30%;
+  top: 40%; left: 40%; width: 20%; height: 20%;
   background: radial-gradient(circle at 30% 30%, var(--glow-c1, rgba(212,167,44,0.15)) 0%, transparent 55%),
               radial-gradient(circle at 70% 60%, var(--glow-c2, rgba(168,85,247,0.12)) 0%, transparent 55%),
               radial-gradient(circle at 40% 80%, var(--glow-c3, rgba(59,130,246,0.10)) 0%, transparent 55%);
-  filter: blur(140px);
+  filter: blur(28px);
   opacity: 0.42;
   z-index: 1;
   overflow: hidden;
@@ -210,10 +215,10 @@ body {
   transition: background 1.8s var(--ease-smooth);
 }
 @keyframes glowMorph {
-  0% { transform: scale(1) translate(0, 0) rotate(0deg); }
-  33% { transform: scale(1.08) translate(3%, -2%) rotate(3deg); }
-  66% { transform: scale(0.95) translate(-2%, 4%) rotate(-2deg); }
-  100% { transform: scale(1.05) translate(2%, 1%) rotate(1deg); }
+  0% { transform: scale3d(6, 6, 1) translate3d(0, 0, 0) rotate(0deg); }
+  33% { transform: scale3d(6.5, 6.5, 1) translate3d(3%, -2%, 0) rotate(3deg); }
+  66% { transform: scale3d(5.7, 5.7, 1) translate3d(-2%, 4%, 0) rotate(-2deg); }
+  100% { transform: scale3d(6.3, 6.3, 1) translate3d(2%, 1%, 0) rotate(1deg); }
 }
 .viewer-dragbar { position: absolute; top: 0; left: 0; right: 0; height: var(--titlebar-h); z-index: 5; pointer-events: none; }
 .media-wrap { width: 100%; height: 100%; overflow: hidden; position: relative; z-index: 2; }
@@ -926,6 +931,8 @@ body:not(.force-native-cursor) input[type="range"]:active::-webkit-slider-runnab
 
 /* Catalog Cards */
 .catalog-card {
+  content-visibility: auto;
+  contain-intrinsic-size: 160px;
   aspect-ratio: 1;
   background: rgba(255,255,255,0.02);
   border-radius: 12px;

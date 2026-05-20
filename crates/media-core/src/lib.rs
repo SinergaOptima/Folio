@@ -291,11 +291,56 @@ pub fn open_image(path: &Path) -> Result<DynamicImage> {
     }
 }
 
+#[cfg(target_os = "macos")]
+pub fn get_video_dimensions_macos(path: &Path) -> Option<(u32, u32)> {
+    use std::process::Command;
+    let output = Command::new("mdls")
+        .arg("-name")
+        .arg("kMDItemPixelWidth")
+        .arg("-name")
+        .arg("kMDItemPixelHeight")
+        .arg(path)
+        .output()
+        .ok()?;
+        
+    if !output.status.success() {
+        return None;
+    }
+    
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut w = None;
+    let mut h = None;
+    
+    for line in stdout.lines() {
+        if line.contains("kMDItemPixelWidth") {
+            w = line.split('=').last().and_then(|s| s.trim().parse().ok());
+        } else if line.contains("kMDItemPixelHeight") {
+            h = line.split('=').last().and_then(|s| s.trim().parse().ok());
+        }
+    }
+    
+    match (w, h) {
+        (Some(w), Some(h)) => Some((w, h)),
+        _ => None,
+    }
+}
+
 pub fn read_metadata_fast(path: &Path) -> Result<ImageMetadata> {
     if is_video_path(path) {
+        let (width, height) = {
+            #[cfg(target_os = "macos")]
+            {
+                get_video_dimensions_macos(path).unwrap_or((1920, 1080))
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                (1920, 1080)
+            }
+        };
+
         return Ok(ImageMetadata {
-            width: 1920,
-            height: 1080,
+            width,
+            height,
             orientation: 1,
             format: None,
             exif: None,
@@ -507,9 +552,15 @@ pub fn extract_dominant_colors(img: &DynamicImage, count: usize) -> Vec<String> 
         centroids.push(pixels[(i * step).min(pixels.len() - 1)]);
     }
     
+    let mut assignments = vec![0; pixels.len()];
+    let mut cluster_sums = vec![[0.0f32; 3]; count];
+    let mut cluster_counts = vec![0; count];
+    
     for _ in 0..5 {
-        let mut clusters: Vec<Vec<[f32; 3]>> = vec![Vec::new(); count];
-        for &pixel in &pixels {
+        cluster_sums.fill([0.0, 0.0, 0.0]);
+        cluster_counts.fill(0);
+        
+        for (p_idx, &pixel) in pixels.iter().enumerate() {
             let mut best_centroid = 0;
             let mut best_dist = f32::MAX;
             for (c_idx, &centroid) in centroids.iter().enumerate() {
@@ -521,19 +572,21 @@ pub fn extract_dominant_colors(img: &DynamicImage, count: usize) -> Vec<String> 
                     best_centroid = c_idx;
                 }
             }
-            clusters[best_centroid].push(pixel);
+            assignments[p_idx] = best_centroid;
+            cluster_sums[best_centroid][0] += pixel[0];
+            cluster_sums[best_centroid][1] += pixel[1];
+            cluster_sums[best_centroid][2] += pixel[2];
+            cluster_counts[best_centroid] += 1;
         }
         
-        for (c_idx, cluster) in clusters.iter().enumerate() {
-            if !cluster.is_empty() {
-                let mut sum = [0.0, 0.0, 0.0];
-                for &p in cluster {
-                    sum[0] += p[0];
-                    sum[1] += p[1];
-                    sum[2] += p[2];
-                }
-                let len = cluster.len() as f32;
-                centroids[c_idx] = [sum[0] / len, sum[1] / len, sum[2] / len];
+        for c_idx in 0..count {
+            let len = cluster_counts[c_idx] as f32;
+            if len > 0.0 {
+                centroids[c_idx] = [
+                    cluster_sums[c_idx][0] / len,
+                    cluster_sums[c_idx][1] / len,
+                    cluster_sums[c_idx][2] / len,
+                ];
             }
         }
     }

@@ -1,11 +1,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
+use std::sync::OnceLock;
 
 pub use rusqlite;
 use anyhow::{Context, Result};
 use media_core::{ImageMetadata, decode_image, is_video_path, read_metadata, scan_supported_images};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::OptionalExtension;
+use r2d2::{Pool, PooledConnection};
+use r2d2_sqlite::SqliteConnectionManager as ConnectionManager;
 use rayon::prelude::*;
 
 #[derive(Debug, Clone)]
@@ -31,33 +34,48 @@ impl LibraryIndex {
     }
 }
 
+static INDEX_THREAD_POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
+
+fn get_index_thread_pool() -> &'static rayon::ThreadPool {
+    INDEX_THREAD_POOL.get_or_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(8)
+            .thread_name(|idx| format!("folio-index-{}", idx))
+            .build()
+            .unwrap()
+    })
+}
+
 /// Build index — skips files that fail metadata reads instead of aborting
 pub fn build_index(root: &Path, cache: &LibraryCache) -> Result<LibraryIndex> {
     let paths = scan_supported_images(root)?;
+    let pool = get_index_thread_pool();
     
-    let items: Vec<LibraryItem> = paths
-        .par_iter()
-        .filter_map(|path| {
-            let metadata = match cache.cached_metadata(path) {
-                Ok(Some(metadata)) => Some(metadata),
-                _ => {
-                    match read_metadata(path) {
-                        Ok(metadata) => {
-                            let _ = cache.upsert_metadata(path, &metadata);
-                            Some(metadata)
+    let items: Vec<LibraryItem> = pool.install(|| {
+        paths
+            .par_iter()
+            .filter_map(|path| {
+                let metadata = match cache.cached_metadata(path) {
+                    Ok(Some(metadata)) => Some(metadata),
+                    _ => {
+                        match read_metadata(path) {
+                            Ok(metadata) => {
+                                let _ = cache.upsert_metadata(path, &metadata);
+                                Some(metadata)
+                            }
+                            Err(_) => None, // Skip files that fail
                         }
-                        Err(_) => None, // Skip files that fail
                     }
-                }
-            }?;
-            let video = is_video_path(path);
-            Some(LibraryItem {
-                path: path.clone(),
-                metadata,
-                is_video: video,
+                }?;
+                let video = is_video_path(path);
+                Some(LibraryItem {
+                    path: path.clone(),
+                    metadata,
+                    is_video: video,
+                })
             })
-        })
-        .collect();
+            .collect()
+    });
 
     Ok(LibraryIndex {
         root: root.to_path_buf(),
@@ -66,9 +84,22 @@ pub fn build_index(root: &Path, cache: &LibraryCache) -> Result<LibraryIndex> {
 }
 
 pub struct LibraryCache {
-    pub connection: std::sync::Mutex<Connection>,
+    pub pool: Pool<ConnectionManager>,
     thumb_dir: PathBuf,
     decoded_dir: PathBuf,
+    temp_dir: PathBuf,
+}
+
+struct FileDropGuard {
+    path: PathBuf,
+}
+
+impl Drop for FileDropGuard {
+    fn drop(&mut self) {
+        if self.path.exists() {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
 }
 
 impl LibraryCache {
@@ -81,71 +112,115 @@ impl LibraryCache {
         fs::create_dir_all(&thumb_dir)?;
         let decoded_dir = root.join("decoded");
         fs::create_dir_all(&decoded_dir)?;
-        let connection = Connection::open(db_path)?;
+        let temp_dir = root.join("temp");
+        
+        // Clean up temp directory from prior crashes on startup
+        if temp_dir.exists() {
+            let _ = fs::remove_dir_all(&temp_dir);
+        }
+        fs::create_dir_all(&temp_dir)?;
 
-        // Enable WAL mode for better concurrent performance
-        connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
+        let manager = ConnectionManager::file(db_path);
+        let pool = Pool::builder()
+            .max_size(10)
+            .build(manager)
+            .context("failed to build rusqlite connection pool")?;
+
+        // Initialize WAL mode on startup using one connection
+        {
+            let conn = pool.get().context("failed to get connection for WAL initialization")?;
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
+        }
 
         let cache = Self {
-            connection: std::sync::Mutex::new(connection),
+            pool,
             thumb_dir,
             decoded_dir,
+            temp_dir,
         };
         cache.ensure_schema()?;
         Ok(cache)
     }
 
+    pub fn conn(&self) -> Result<PooledConnection<ConnectionManager>> {
+        self.pool.get().context("failed to get database connection from pool")
+    }
+
     fn ensure_schema(&self) -> Result<()> {
-        let conn = self.connection.lock().unwrap();
-        conn.execute_batch(
-            r#"
-            CREATE TABLE IF NOT EXISTS image_metadata (
-                path TEXT PRIMARY KEY,
-                modified_secs INTEGER NOT NULL,
-                width INTEGER NOT NULL,
-                height INTEGER NOT NULL,
-                orientation INTEGER NOT NULL,
-                format TEXT,
-                camera TEXT,
-                aperture TEXT,
-                shutter_speed TEXT,
-                iso TEXT,
-                focal_length TEXT,
-                latitude REAL,
-                longitude REAL
-            );
-            CREATE TABLE IF NOT EXISTS albums (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT UNIQUE NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS album_images (
-                album_id INTEGER,
-                image_path TEXT,
-                PRIMARY KEY (album_id, image_path),
-                FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE
-            );
-            CREATE TABLE IF NOT EXISTS tags (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT UNIQUE NOT NULL,
-                color TEXT
-            );
-            CREATE TABLE IF NOT EXISTS image_tags (
-                image_path TEXT,
-                tag_name TEXT,
-                PRIMARY KEY (image_path, tag_name)
-            );
-            "#,
-        )?;
-        let _ = conn.execute("ALTER TABLE image_metadata ADD COLUMN latitude REAL", []);
-        let _ = conn.execute("ALTER TABLE image_metadata ADD COLUMN longitude REAL", []);
-
-        // Simple migration for existing DBs
-        let _ = conn.execute("ALTER TABLE image_metadata ADD COLUMN camera TEXT;", []);
-        let _ = conn.execute("ALTER TABLE image_metadata ADD COLUMN aperture TEXT;", []);
-        let _ = conn.execute("ALTER TABLE image_metadata ADD COLUMN shutter_speed TEXT;", []);
-        let _ = conn.execute("ALTER TABLE image_metadata ADD COLUMN iso TEXT;", []);
-        let _ = conn.execute("ALTER TABLE image_metadata ADD COLUMN focal_length TEXT;", []);
-
+        let conn = self.conn()?;
+        
+        let current_version: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        
+        if current_version < 1 {
+            conn.execute_batch(
+                r#"
+                CREATE TABLE IF NOT EXISTS image_metadata (
+                    path TEXT PRIMARY KEY,
+                    modified_secs INTEGER NOT NULL,
+                    width INTEGER NOT NULL,
+                    height INTEGER NOT NULL,
+                    orientation INTEGER NOT NULL,
+                    format TEXT,
+                    camera TEXT,
+                    aperture TEXT,
+                    shutter_speed TEXT,
+                    iso TEXT,
+                    focal_length TEXT,
+                    latitude REAL,
+                    longitude REAL
+                );
+                CREATE TABLE IF NOT EXISTS albums (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS album_images (
+                    album_id INTEGER,
+                    image_path TEXT,
+                    PRIMARY KEY (album_id, image_path),
+                    FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE
+                );
+                CREATE TABLE IF NOT EXISTS tags (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE NOT NULL,
+                    color TEXT
+                );
+                CREATE TABLE IF NOT EXISTS image_tags (
+                    image_path TEXT,
+                    tag_name TEXT,
+                    PRIMARY KEY (image_path, tag_name)
+                );
+                "#,
+            )?;
+            conn.execute("PRAGMA user_version = 1;", [])?;
+        }
+        
+        let current_version: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        if current_version < 2 {
+            let table_info: Vec<String> = {
+                let mut stmt = conn.prepare("PRAGMA table_info(image_metadata)")?;
+                let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            };
+            
+            let columns_to_add = [
+                ("latitude", "REAL"),
+                ("longitude", "REAL"),
+                ("camera", "TEXT"),
+                ("aperture", "TEXT"),
+                ("shutter_speed", "TEXT"),
+                ("iso", "TEXT"),
+                ("focal_length", "TEXT"),
+            ];
+            
+            for (col_name, col_type) in &columns_to_add {
+                if !table_info.contains(&col_name.to_string()) {
+                    let query = format!("ALTER TABLE image_metadata ADD COLUMN {} {};", col_name, col_type);
+                    let _ = conn.execute(&query, []);
+                }
+            }
+            conn.execute("PRAGMA user_version = 2;", [])?;
+        }
+        
         Ok(())
     }
 
@@ -164,7 +239,8 @@ impl LibraryCache {
             None => (None, None, None, None, None, None, None),
         };
 
-        self.connection.lock().unwrap().execute(
+        let conn = self.conn()?;
+        conn.execute(
             r#"
             INSERT INTO image_metadata(path, modified_secs, width, height, orientation, format, camera, aperture, shutter_speed, iso, focal_length, latitude, longitude)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
@@ -182,7 +258,7 @@ impl LibraryCache {
                 latitude = excluded.latitude,
                 longitude = excluded.longitude
             "#,
-            params![
+            rusqlite::params![
                 path.to_string_lossy(),
                 modified,
                 i64::from(metadata.width),
@@ -203,15 +279,15 @@ impl LibraryCache {
 
     pub fn cached_metadata(&self, path: &Path) -> Result<Option<ImageMetadata>> {
         let modified = modified_secs(path)?;
-        let row = self
-            .connection.lock().unwrap()
+        let conn = self.conn()?;
+        let row = conn
             .query_row(
                 r#"
                 SELECT width, height, orientation, format, modified_secs, camera, aperture, shutter_speed, iso, focal_length, latitude, longitude
                 FROM image_metadata
                 WHERE path = ?1
                 "#,
-                params![path.to_string_lossy()],
+                rusqlite::params![path.to_string_lossy()],
                 |row| {
                     Ok((
                         row.get::<_, i64>(0)?,
@@ -278,13 +354,13 @@ impl LibraryCache {
         if is_video_path(path) {
             #[cfg(target_os = "macos")]
             {
-                let temp_dir = std::env::temp_dir();
+                let temp_dir = &self.temp_dir;
                 let output = std::process::Command::new("qlmanage")
                     .arg("-t")
                     .arg("-s")
                     .arg(max_side.to_string())
                     .arg("-o")
-                    .arg(&temp_dir)
+                    .arg(temp_dir)
                     .arg(path)
                     .output();
                 
@@ -293,6 +369,7 @@ impl LibraryCache {
                         let filename = path.file_name().ok_or_else(|| anyhow::anyhow!("no filename for video"))?;
                         let generated_png = temp_dir.join(format!("{}.png", filename.to_string_lossy()));
                         if generated_png.exists() {
+                            let _guard = FileDropGuard { path: generated_png.clone() };
                             let img = image::open(&generated_png)
                                 .with_context(|| format!("failed to open generated video frame at {}", generated_png.display()))?;
                             let mut file = std::fs::File::create(&tmp_path)
@@ -301,7 +378,6 @@ impl LibraryCache {
                             image::DynamicImage::ImageRgba8(img.to_rgba8())
                                 .write_with_encoder(encoder)
                                 .with_context(|| format!("failed to write jpeg to {}", tmp_path.display()))?;
-                            let _ = std::fs::remove_file(&generated_png);
                             
                             std::fs::rename(&tmp_path, &thumb_path)
                                 .with_context(|| format!("failed to finalize thumbnail {}", thumb_path.display()))?;
@@ -314,7 +390,6 @@ impl LibraryCache {
         }
 
         if media_core::can_use_sips(path) {
-            // High-performance native thumbnailing
             media_core::sips_output_to_file(path, &tmp_path, Some(max_side), "jpeg")
                 .with_context(|| format!("native sips thumbnail failed for {}", path.display()))?;
         } else {
@@ -335,9 +410,6 @@ impl LibraryCache {
         Ok(thumb_path)
     }
 
-    /// Decode a non-native-format image (RAW, exotic TIFF, HEIC, etc.) via sips,
-    /// cache the result as a high-quality JPEG, and return the cached path.
-    /// On subsequent calls the cached file is returned immediately.
     pub fn ensure_decoded(&self, path: &Path) -> Result<PathBuf> {
         let fingerprint = image_fingerprint(path)?;
         let cached = self.decoded_dir.join(format!("{fingerprint}.jpg"));
@@ -347,13 +419,11 @@ impl LibraryCache {
         let tmp_path = cached.with_extension("tmp");
 
         if media_core::needs_sips_decode(path) {
-            // High-performance native decode directly to the cached file
             media_core::sips_output_to_file(path, &tmp_path, None, "jpeg")
                 .with_context(|| format!("native sips decode failed for {}", path.display()))?;
         } else {
             let img = media_core::open_image(path)?;
             let img = media_core::apply_exif_orientation(&img, path);
-            // Encode as high-quality JPEG (q95) — much smaller than 16-bit PNG, lossless enough
             let rgb8 = img.to_rgb8();
             let mut file = std::fs::File::create(&tmp_path)
                 .with_context(|| format!("failed to create decoded cache file: {}", tmp_path.display()))?;
