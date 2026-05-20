@@ -24,7 +24,34 @@ Folio is a high-performance, macOS-native media viewer. It uses Tauri for its ar
 - **Custom SVG Icon System**: Every icon in the app uses crisp, consistent inline SVGs — no emoji fallbacks.
 - **Window Vibrancy**: Optional macOS-native window transparency and background tinting.
 
+## 🗺️ Roadmap & Upcoming Changes
+
+We are actively engineering several high-performance upgrades, workflow enhancements, and deep native macOS integrations. Here is what is currently in active development:
+
+### 🚄 Phase 1: High-Performance Engine & Caching (Engine Sweep)
+* **Direct Memory-Mapped SQLite Mirroring**: Syncing hyper-active read indices to in-memory databases (`:memory:`) to drop search and filter query latencies to near-zero.
+* **SIMD-Accelerated Downscaler**: Re-architecting thumbnail generation with AVX-2, SSE, and NEON instruction sets using the `fast_image_resize` crate.
+* **Zero-Copy Chunk Streaming**: Updating our custom Tauri asset protocol to stream media via asynchronous `ReaderStream` and `tokio::fs::File` pipelines, drastically shrinking memory overhead.
+* **Auto-Vacuuming & Database Tuning**: Actively managing cache footprints with incremental vacuum scheduling (`PRAGMA incremental_vacuum`) and background WAL database checkpoints.
+
+### 🎨 Phase 2: Responsive Workspaces & Custom Cursor HUDs
+* **Pane Partitions & Dynamic Grid pack**: Integrating draggable canvas dividers to scale workspace sections dynamically alongside pixel-perfect adaptive grid cols.
+* **Compact Cursor Ring & Pointer HUDs**: Reducing the primary magnetic ring footprint to an elegant, minimal target pointer, transitioning to specialized pointer vectors (double arrows, crosshairs) on sliders and timelines.
+* **Storage Diagnostics Dashboard**: Adding a Cache Control settings menu allowing users to monitor database/thumbnail directory sizes on disk and clear all local caches with a single click.
+
+### 📸 Phase 3: Professional Creative & Audit Utilities
+* **Before/After Comparators**: Implementing dual-viewport slider controls to inspect brightness, vibrance, or tone curve adjustments side-by-side.
+* **Visual Duplicates Resolver overlay**: A clean, side-by-side metadata and visual resolver grid to instantly review, compare, and prune low-quality duplicates.
+* **Mapbox/Leaflet GPS Geolocation Mapping**: Upgrading static coordinates into dynamic interactive Leaflet mapping networks, clustered with photo thumbnails.
+* **Selection Modification HUD**: Sliding metadata panel with EXIF adjustments, tagging tools, and an integrated catalog file delete controller.
+
+### 🍏 Phase 4: Apple Hardware & Security Platform integrations
+* **Live Photos AVPlayer**: Seamless pairing of HEIC+MOV formats, rendering active Live Photo sequences on hold clicks.
+* **CoreML Asset Auto-Taggers**: On-device classification via Apple's Neural Engine using mobile neural classifiers.
+* **CoreHaptics Trackpad Snapping**: Generating physical haptic ticks on Apple Trackpads when scales lock to fit margins or 100%.
+
 > **Note:** The auto-updater is currently on hold due to signature and certificate issues. Please download manual updates from the GitHub Releases page.
+
 
 ### "App is damaged and can't be opened" (macOS)
 Because Folio is a free, open-source app, it is not cryptographically "notarized" using a paid Apple Developer account ($99/year). Because of this, modern macOS Gatekeeper intentionally marks the downloaded app as "damaged" to force developers into their paid ecosystem, completely hiding the "Open Anyway" button.
